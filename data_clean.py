@@ -20,25 +20,37 @@ def clean_matches(
             removed = 0
 
             for row in reader:
-                # 1️⃣ Filter invalid draw names
+                # 1. Filter invalid draw names
                 draw = (row.get("draw") or "").lower()
                 if any(bad in draw for bad in INVALID_DRAWS):
                     removed += 1
                     continue
 
-                # 2️⃣ Filter incomplete matches (no score)
+                # 2. Filter incomplete matches (no raw score text)
                 raw_points = (row.get("raw_points") or "").strip()
                 if not raw_points:
                     removed += 1
                     continue
 
-                # 3️⃣ Remove rows without match_date
+                # 3. Remove rows without match_date
                 match_date = (row.get("match_date") or "").strip()
                 if not match_date:
                     removed += 1
                     continue
 
-                # 4️⃣ Normalize player names
+                # 4. Remove rows without squash score
+                sq_p1 = row.get("SQ_p1")
+                sq_p2 = row.get("SQ_p2")
+                if (
+                    sq_p1 is None
+                    or sq_p2 is None
+                    or str(sq_p1).strip() == ""
+                    or str(sq_p2).strip() == ""
+                ):
+                    removed += 1
+                    continue
+
+                # 5. Normalize player names
                 for field in ("team1_players", "team2_players"):
                     name = row.get(field) or ""
 
