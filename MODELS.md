@@ -1,7 +1,3 @@
-Absolutely — here’s the kind of document you want: model-by-model, implementation-first, focused on **how each component is computed and what logic it uses**.
-
----
-
 # Racketlon Predictor — Model and Rating Implementation Notes
 
 This document describes the core modeling pipeline at the implementation level:
@@ -930,7 +926,3 @@ This is important because it decouples:
 - combines identity embeddings with engineered numeric features
 - more flexible representation learning
 - higher tuning burden than CatBoost
-
----
-
-If you want, I can turn this into a polished `README.md` file with markdown formatting exactly ready to paste into the repo.
