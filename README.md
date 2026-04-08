@@ -23,7 +23,7 @@ The project is composed of three main layers:
 ## 1. Data & Feature Pipeline
 
 ```
-matches_cleaned.csv → features_v4.py → data/data.csv
+matches_cleaned.csv → features.py → data/data.csv
 ```
 
 ## 2. Model Layer
@@ -72,7 +72,7 @@ This guarantees:
 Implemented in:
 
 ```python
-features_v4.py
+features.py
 ```
 
 Each row represents a **single match**, with features computed **before updating state**.
@@ -556,10 +556,3 @@ The implementation prioritizes:
 - correctness of temporal logic
 - flexibility of feature construction
 - extensibility for future models
-
----
-
-If you want next, I can:
-
-- convert this into a **paper-style Methods section**
-- or add **diagrams (model + pipeline)** for your project submission
