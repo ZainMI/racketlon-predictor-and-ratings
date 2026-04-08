@@ -1,8 +1,9 @@
-# features_v3.py
+# features_v4.py
 #
 # Builds a SINGLE training-ready dataset with:
 # - leakage-safe pre-match features (margin-Elo + H2H up to that point)
 # - monthly snapshot rating features computed directly from raw matches
+# - explicit per-player current ratings for synthetic future matchup construction
 # - targets:
 #     * per-sport diffs      -> {SPORT}_y_diff
 #     * per-sport totals     -> {SPORT}_y_total
@@ -24,7 +25,6 @@ from scipy.optimize import minimize_scalar
 SPORTS = ["TT", "BD", "SQ", "TN"]
 SPORTS_LOWER = ["tt", "bd", "sq", "tn"]
 SPORT_UPPER_TO_LOWER = {"TT": "tt", "BD": "bd", "SQ": "sq", "TN": "tn"}
-SPORT_LOWER_TO_UPPER = {"tt": "TT", "bd": "BD", "sq": "SQ", "tn": "TN"}
 
 # -----------------------
 # Identity config
@@ -227,8 +227,7 @@ def old_get_diff_by_sport(sport, row):
 
 def get_rating_diff(r1, r2):
     return {
-        sport: float(r1[sport]) - float(r2[sport])
-        for sport in ["tt", "bd", "sq", "tn"]
+        sport: float(r1[sport]) - float(r2[sport]) for sport in SPORTS_LOWER
     }
 
 
@@ -339,16 +338,7 @@ def best_alpha(train_data, ratings):
     return ret
 
 
-def get_score_diffs(ex, alphas):
-    ret = {}
-    for sport in ex:
-        ret[sport] = rating_to_score_diff(ex[sport], alphas[sport])
-    return ret
-
-
-def build_ratings_by_month_from_matches(
-    df: pd.DataFrame, include_current_month_snapshot: bool = True
-):
+def build_ratings_by_month_from_matches(df: pd.DataFrame):
     all_matches = [row_to_old_match_format(r) for _, r in df.iterrows()]
     all_matches = sorted(all_matches, key=lambda x: x["date"])
 
@@ -395,45 +385,6 @@ def build_ratings_by_month_from_matches(
             "ratings": copy.deepcopy(dict(ratings_by_month)),
             "alphas": best_alphas,
         }
-
-        if i < len(grouped) - 1:
-            ym2, rows2 = grouped[i + 1]
-            total = 0
-            rmse = {"tt": 0.0, "bd": 0.0, "sq": 0.0, "tn": 0.0}
-            correct = 0
-
-            for row in rows2:
-                p1 = row["p1"]
-                p2 = row["p2"]
-                if p1 not in ratings_by_month or p2 not in ratings_by_month:
-                    continue
-
-                r1 = ratings_by_month[p1]
-                r2 = ratings_by_month[p2]
-
-                actual_diff = get_actual_diff_old(row)
-                rating_diff = get_rating_diff(r1, r2)
-                expected_diff = get_score_diffs(rating_diff, best_alphas)
-                error = compute_error(actual_diff, expected_diff)
-
-                for sport in rmse:
-                    rmse[sport] += error[sport] ** 2
-
-                if np.sign(sum(actual_diff.values())) == np.sign(
-                    sum(expected_diff.values())
-                ):
-                    correct += 1
-
-                total += 1
-
-            if total > 0:
-                for sport in rmse:
-                    rmse[sport] = float(np.sqrt(rmse[sport] / total))
-
-                results[key]["per_sport_rmse"] = rmse
-                results[key]["avg_rmse"] = float(sum(rmse.values()) / len(rmse))
-                results[key]["correct"] = float(correct / total)
-                results[key]["total_matches_tested"] = int(total)
 
     return results
 
@@ -618,10 +569,7 @@ def build_training_data(
     df = df.sort_values("datetime").reset_index(drop=True)
 
     print("Building monthly snapshot ratings in memory...")
-    ratings_by_month = build_ratings_by_month_from_matches(
-        df,
-        include_current_month_snapshot=include_current_month_snapshot,
-    )
+    ratings_by_month = build_ratings_by_month_from_matches(df)
 
     elo = MarginElo()
 
@@ -650,9 +598,13 @@ def build_training_data(
             "p2_name": p2_name,
         }
 
-        # Running margin-Elo features
+        # Current running margin-Elo features
         pred = elo.predict(p1_key, p2_key)
         for s in SPORTS:
+            # NEW: explicit individual current ratings
+            out[f"{s}_rating_p1"] = elo.R[p1_key][s]
+            out[f"{s}_rating_p2"] = elo.R[p2_key][s]
+
             out[f"{s}_rating_diff"] = elo.R[p1_key][s] - elo.R[p2_key][s]
             out[f"{s}_pred_diff"] = pred[s]
             out[f"{s}_games_p1"] = elo.games[p1_key][s]

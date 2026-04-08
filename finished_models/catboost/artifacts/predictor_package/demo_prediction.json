@@ -5,30 +5,30 @@
     "TT": {
       "score_p1": 9,
       "score_p2": 21,
-      "pred_diff": -11.675807857468897,
-      "pred_total": 30.532850868534496
+      "pred_diff": -12.49753422772942,
+      "pred_total": 30.42765233606176
     },
     "BD": {
       "score_p1": 21,
       "score_p2": 4,
-      "pred_diff": 16.679712659941906,
-      "pred_total": 25.534991088786064
+      "pred_diff": 17.001948768134163,
+      "pred_total": 25.980601161301934
     },
     "SQ": {
       "score_p1": 21,
       "score_p2": 8,
-      "pred_diff": 12.714295276470768,
-      "pred_total": 29.434930511137974
+      "pred_diff": 13.218012286589406,
+      "pred_total": 28.63317443191415
     },
     "TN": {
       "score_p1": 21,
-      "score_p2": 8,
-      "pred_diff": 9.079387505334934,
-      "pred_total": 16.855342520953094
+      "score_p2": 7,
+      "pred_diff": 9.24339223976071,
+      "pred_total": 15.035703990435529
     }
   },
   "total_p1": 72,
-  "total_p2": 41,
-  "total_diff": 31,
+  "total_p2": 40,
+  "total_diff": 32,
   "winner": "zain magdon-ismail"
 }

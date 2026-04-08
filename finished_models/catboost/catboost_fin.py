@@ -20,6 +20,7 @@ DATA_PATH = "data/data.csv"
 OUTPUT_DIR = "finished_models/catboost/artifacts/predictor_package"
 TRAIN_RATIO = 0.8
 PREDICT_TENNIS_INDEPENDENTLY = True
+KEEP_SNAPSHOT_DIFF = True
 
 CATBOOST_PARAMS = dict(
     iterations=800,
@@ -27,7 +28,7 @@ CATBOOST_PARAMS = dict(
     learning_rate=0.03,
     loss_function="MAE",
     eval_metric="MAE",
-    random_seed=42,
+    random_seed=12,
     verbose=False,
 )
 
@@ -73,6 +74,8 @@ def get_feature_columns(df):
         if c.startswith("has_"):
             continue
         if "_pred_diff" in c:
+            continue
+        if "snapshot_rating_diff" in c and not KEEP_SNAPSHOT_DIFF:
             continue
         feature_cols.append(c)
     return sorted(feature_cols)
