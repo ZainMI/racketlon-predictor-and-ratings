@@ -1,148 +1,44 @@
-Absolutely — here’s a **low-level, implementation-oriented project document**.
-This is written more like an internal engineering spec than a high-level README.
+Absolutely — here’s the kind of document you want: model-by-model, implementation-first, focused on **how each component is computed and what logic it uses**.
 
 ---
 
-# Racketlon Predictor — Implementation Notes
+# Racketlon Predictor — Model and Rating Implementation Notes
 
-## Repository purpose
+This document describes the core modeling pipeline at the implementation level:
 
-This repository implements a predictive system for racketlon matches using:
+1. **Ratings**
+2. **Baseline model**
+3. **CatBoost model**
+4. **Player embedding model**
 
-- chronological feature construction from raw match history
-- per-sport regression models for:
-  - score difference
-  - score total
+The focus is on:
 
-- match-level score reconstruction
-- synthetic feature construction for unseen player pairings
-
-The project currently has two main model families:
-
-- **Tier 1:** CatBoost on engineered tabular features
-- **Tier 2:** PyTorch player-embedding MLP on engineered tabular features
+- what each component is
+- how it is computed
+- why it behaves the way it does
 
 ---
 
-# 1. Core data flow
+# 1. Ratings
 
-## 1.1 Raw input
+The project uses **two different notions of rating**:
 
-Primary raw source:
+- **current running rating**
+- **snapshot rating**
 
-```text
-data/matches_cleaned.csv
-```
-
-Expected columns include:
-
-```text
-mode,tournament_id,match_date,match_time,draw,draw_id,round,duration,location,
-team1_players,team2_players,team1_player_ids,team2_player_ids,
-winner_side,status_message,
-TT_p1,TT_p2,BD_p1,BD_p2,SQ_p1,SQ_p2,TN_p1,TN_p2,...
-```
-
-Important raw fields used by the implementation:
-
-- `match_date`
-- `match_time`
-- `team1_players`, `team2_players`
-- `team1_player_ids`, `team2_player_ids`
-- `TT_p1`, `TT_p2`
-- `BD_p1`, `BD_p2`
-- `SQ_p1`, `SQ_p2`
-- `TN_p1`, `TN_p2`
+These are not the same thing.
 
 ---
 
-## 1.2 Processed feature table
+## 1.1 Current running rating
 
-Generated output:
+This is the dynamic, match-by-match rating used in the feature pipeline.
 
-```text
-data/data.csv
-```
+It is implemented in the `MarginElo` class and updated **sequentially in chronological order**.
 
-This is the main training table for Tier 1 and Tier 2.
+### Per-player state
 
-Each row corresponds to one historical match.
-
-The row contains:
-
-- identifiers
-- pre-match engineered features
-- post-match targets
-
-The invariant is:
-
-> all feature columns must be computable using only information available before the match starts
-
----
-
-# 2. Feature generation implementation
-
-Implemented in:
-
-```text
-features_v4.py
-```
-
-The file builds `data/data.csv` directly from `matches_cleaned.csv`.
-
----
-
-## 2.1 Row ordering
-
-The entire pipeline depends on strict chronological ordering.
-
-Implementation pattern:
-
-```python
-df["datetime"] = safe_datetime(df)
-df = df.sort_values("datetime").reset_index(drop=True)
-```
-
-This ordering is used for:
-
-- current rating updates
-- H2H updates
-- snapshot assignment
-- leakage prevention
-
----
-
-## 2.2 Identity handling
-
-Players are keyed using:
-
-```python
-player_key(row, side)
-```
-
-Behavior:
-
-- if `USE_IDS = True` and `team{side}_player_ids` exists, use that
-- otherwise fall back to normalized player name
-
-This lets the system distinguish between:
-
-- **display identity**: `p1_name`, `p2_name`
-- **model identity**: `p1_key`, `p2_key`
-
-This separation matters because:
-
-- embeddings use keys
-- snapshot logic uses names
-- printed output uses names
-
----
-
-## 2.3 Current running ratings
-
-Current ratings are maintained by `MarginElo`.
-
-### State structure
+For each player and each sport, the system stores:
 
 ```python
 self.R[player][sport]
@@ -151,40 +47,138 @@ self.games[player][sport]
 
 Where:
 
-- `R` stores current rating per player per sport
-- `games` stores total completed matches per player per sport
+- `R[player][sport]` = current rating
+- `games[player][sport]` = number of completed matches in that sport
 
-### Prediction function
-
-For each sport:
+The sports are:
 
 ```python
-x = self.R[p1][sport] - self.R[p2][sport]
-pred = rating_to_score_diff(x, ALPHAS[sport])
+SPORTS = ["TT", "BD", "SQ", "TN"]
 ```
 
-### Update function
+---
 
-After each completed match:
+## 1.2 Current rating prediction function
+
+Before updating ratings, the system computes the expected score difference from the rating difference.
+
+For a sport:
 
 ```python
-err = actual_diff - pred
+x = R[p1][sport] - R[p2][sport]
+pred = 21 * tanh((alpha * x) / 2)
+```
+
+Implementation:
+
+```python
+def rating_to_score_diff(x: float, alpha: float) -> float:
+    return MAX_DIFF * math.tanh((alpha * x) / 2.0)
+```
+
+Where:
+
+- `MAX_DIFF = 21`
+- `alpha` is a fixed slope parameter per sport in this running-rating system
+
+Typical values used:
+
+```python
+ALPHAS = {"TT": 0.010, "BD": 0.010, "SQ": 0.010, "TN": 0.010}
+```
+
+This means:
+
+- if rating difference is small, expected score difference is small
+- if rating difference is large, expected score difference saturates toward ±21
+
+---
+
+## 1.3 Current rating update rule
+
+After the actual match is observed, the rating is updated using prediction error.
+
+### Step 1: compute actual diff
+
+```python
+d = actual_score_p1 - actual_score_p2
+```
+
+### Step 2: compute prediction error
+
+```python
+err = d - pred
+```
+
+### Step 3: compute learning rate
+
+The learning rate decays with the number of games played:
+
+```python
+eta_eff(games_played) = ETA_MIN + (ETA_MAX - ETA_MIN) * exp(-games_played / ETA_TAU)
+```
+
+with:
+
+```python
+ETA_MIN = 0.02
+ETA_MAX = 0.20
+ETA_TAU = 15.0
+```
+
+Then the two-player learning rate is averaged:
+
+```python
+eta = 0.5 * (eta_eff(g1) + eta_eff(g2))
+```
+
+This means:
+
+- newer players update faster
+- established players update more slowly
+
+---
+
+## 1.4 Current rating gradient step
+
+The predicted diff is nonlinear in the rating difference, so the update uses the derivative:
+
+```python
+grad = d_pred_dx(x, alpha)
 step = eta * err * grad
 step -= eta * L2 * x
 ```
 
-Then:
+with small regularization:
 
 ```python
-R[p1] += step
-R[p2] -= step
+L2 = 1e-5
 ```
 
-The update is symmetric.
+Then ratings are updated symmetrically:
 
-### Stored columns
+```python
+R[p1] = r1 + step
+R[p2] = r2 - step
+```
 
-For each sport, feature generation writes:
+This makes it:
+
+- zero-sum between the two players
+- stable over time
+- sensitive to prediction error
+
+---
+
+## 1.5 What current ratings represent
+
+These ratings are intended to capture:
+
+> **recent form and sequentially updated strength**
+
+Because they are updated after every match, they move faster than monthly snapshots.
+
+Stored feature columns include:
 
 ```text
 TT_rating_p1
@@ -195,53 +189,111 @@ TT_games_p2
 TT_games_diff
 ```
 
-Same for `BD`, `SQ`, `TN`.
-
-These are the columns later used for synthetic inference.
+and similarly for BD, SQ, TN.
 
 ---
 
-## 2.4 Snapshot ratings
+# 2. Snapshot ratings
 
-Snapshot ratings are monthly, slower-moving skill estimates.
+Snapshot ratings are slower, more stable ratings computed on a **monthly basis**.
 
-They are computed in memory from the raw match table rather than loaded from a separate JSON file.
+They are designed to represent:
 
-### Build path
+> **long-term player strength at a fixed point in time**
 
-Main function:
+---
+
+## 2.1 Why snapshots exist
+
+The current running rating is:
+
+- dynamic
+- order-sensitive
+- more reactive
+
+The snapshot rating is:
+
+- slower
+- more stable
+- less noisy
+- more like a monthly skill estimate
+
+This gives the model both:
+
+- short-term form
+- long-term skill
+
+---
+
+## 2.2 Snapshot computation logic
+
+Snapshots are computed by grouping matches by month, then iteratively updating a monthly rating table.
+
+At a high level:
+
+1. sort matches chronologically
+2. group them by `(year, month)`
+3. for each month:
+   - run rating updates over matches in that month
+   - store resulting player ratings as the month snapshot
+
+Internally, the monthly updater uses:
+
+- player history initialization
+- decayed weighting by recency
+- repeated passes over the month’s matches
+
+---
+
+## 2.3 Initialization from player history
+
+If a player does not yet have a monthly rating entry, the system initializes it using historical average margin over a long window.
+
+Implementation idea:
 
 ```python
-build_ratings_by_month_from_matches(df)
+compute_history(player, date, history, within=100)
 ```
 
-This groups matches by `(year, month)` and computes a snapshot object for each month.
+This computes average score margins for each sport over the player’s past matches.
 
-Each snapshot entry contains:
+So the initial monthly rating is not random or zero-only; it is seeded from actual historical performance.
+
+---
+
+## 2.4 Monthly update rule
+
+For each month, ratings are updated repeatedly over that month’s matches:
 
 ```python
-{
-    "ratings": {
-        player_name: {
-            "tt": ...,
-            "bd": ...,
-            "sq": ...,
-            "tn": ...
-        }
-    },
-    "alphas": {...}
-}
+for j in range(1, 10):
+    update_all_ratings(rows, ratings_by_month, history, ref_date, base_eta=1 / j)
 ```
 
-### Snapshot selection for a match
+This is effectively a smoothing procedure:
 
-For each row in `data.csv`:
+- earlier passes allow larger movement
+- later passes refine ratings with smaller steps
+
+The update logic compares:
 
 ```python
-snapshot_key, snapshot = get_last_month_snapshot(...)
+actual_diff - expected_diff
 ```
 
-Then the feature generator writes:
+where expected diff is the difference between players’ monthly ratings.
+
+---
+
+## 2.5 Snapshot alpha fitting
+
+In the older snapshot system, alphas were fit separately per sport to map rating diff to expected score diff.
+
+This logic existed primarily for the older rating-only model and for generating transformed predicted-diff features.
+
+Later, for CatBoost, the raw snapshot ratings turned out to be more important than these transformed features.
+
+Stored snapshot columns include:
 
 ```text
 TT_snapshot_rating_p1
@@ -251,670 +303,634 @@ TT_snapshot_p1_found
 TT_snapshot_p2_found
 ```
 
-These are raw monthly ratings, not current running ratings.
+---
 
-### Important distinction
+## 2.6 What snapshots represent
 
-- `*_rating_*` = dynamic match-by-match state
-- `*_snapshot_rating_*` = month-frozen state
+Snapshot ratings are best interpreted as:
+
+> **monthly frozen skill estimates**
+
+They do not change from match to match inside the same month.
+
+In practice, they ended up being the strongest single feature family in the project.
 
 ---
 
-## 2.5 Head-to-head features
+# 3. Baseline model
 
-H2H is stored using `H2HStats`.
+The baseline is a simple regression model built directly from **running averages**, without complex feature engineering.
 
-### State
+Its purpose is to provide:
 
-```python
-games
-wins_a
-sum_diff_a
-last_dt
-```
-
-Pair key is canonicalized via:
-
-```python
-pair_key(a, b)
-```
-
-This ensures `(p1, p2)` and `(p2, p1)` hit the same state object.
-
-### Per-row output
-
-Overall:
-
-```text
-h2h_games
-h2h_avg_diff_p1
-h2h_winrate_p1
-h2h_days_since_last
-```
-
-Per sport:
-
-```text
-TT_h2h_games
-TT_h2h_avg_diff_p1
-TT_h2h_winrate_p1
-TT_h2h_days_since_last
-```
-
-etc.
-
-The `_p1` suffix means:
-
-> values are oriented from the perspective of the current row’s p1 player
+- a sanity check
+- a low-capacity comparison point
+- a simple benchmark before using more expressive models
 
 ---
 
-## 2.6 Targets
+## 3.1 Baseline feature logic
+
+The baseline computes pre-match running averages for each player and sport.
+
+For each player and sport, it stores:
+
+```python
+diff_sum[player][sport]
+total_sum[player][sport]
+count[player][sport]
+```
+
+Then the pre-match average is:
+
+```python
+avg_diff = diff_sum / (count + shrink)
+avg_total = total_sum / (count + shrink)
+```
+
+with:
+
+```python
+shrink = 10
+```
+
+This shrinkage acts like a prior:
+
+- if a player has few matches, averages are shrunk toward zero
+- if a player has many matches, their actual average dominates
+
+---
+
+## 3.2 Baseline per-sport features
+
+For a match between p1 and p2, the baseline computes:
+
+```python
+delta_diff = p1_avg_diff - p2_avg_diff
+delta_total = p1_avg_total - p2_avg_total
+sum_total = p1_avg_total + p2_avg_total
+```
+
+These are the only sport-level inputs.
+
+So per sport, the baseline uses 3 features:
+
+- relative average margin
+- relative average total points
+- combined average total points
+
+This is a very compact representation.
+
+---
+
+## 3.3 Baseline model type
+
+The baseline uses **Ridge regression**.
 
 For each sport:
 
-```text
-TT_y_diff
-TT_y_total
+- one model predicts score difference
+- one model predicts score total
+
+Implementation pattern:
+
+```python
+model_diff = Ridge(alpha=1.0)
+model_total = Ridge(alpha=1.0)
 ```
 
-And match-level:
+This means:
 
-```text
-y_total_diff
-y_winner_p1
-```
-
-Targets are written into the same row only after pre-match features have been assembled.
+- linear model
+- L2 regularization
+- low variance
+- easy to interpret
 
 ---
 
-# 3. Tier 1 model implementation
+## 3.4 Why Ridge
 
-Implemented in a CatBoost training file such as:
+Ridge is used because:
 
-```text
-catboost_regressor.py
-```
+- features are small and dense
+- it is stable
+- it prevents coefficient blow-up
+- it provides a good “simple but reasonable” baseline
 
-or the cleaned production-style variant.
+It is not designed to capture:
+
+- nonlinear interactions
+- higher-order effects
+- sparse conditional logic
+
+That limitation is why Tier 1 and Tier 2 were added.
 
 ---
 
-## 3.1 Model decomposition
+# 4. CatBoost model
 
-There is no single joint model across all sports.
+CatBoost is the main **Tier 1** production-style model.
 
-Instead:
+It is a **gradient boosted decision tree model** for tabular data.
+
+---
+
+## 4.1 What kind of model CatBoost is
+
+CatBoost is a boosting algorithm that builds an ensemble of decision trees sequentially.
+
+At a high level:
+
+1. start with a simple prediction
+2. compute residuals / errors
+3. fit a new tree to reduce those errors
+4. add that tree into the ensemble
+5. repeat many times
+
+So instead of learning one global linear function, it learns:
+
+> **a sum of many small decision trees**
+
+This makes it strong for:
+
+- nonlinear tabular data
+- heterogeneous feature scales
+- interactions between features
+- missing values
+
+---
+
+## 4.2 CatBoost model decomposition
+
+Like the baseline, CatBoost is trained per sport.
 
 For each sport:
 
 - one regressor predicts `*_y_diff`
 - one regressor predicts `*_y_total`
 
-So total trained models:
+So total CatBoost models trained:
 
 ```text
 4 sports × 2 targets = 8 regressors
 ```
 
-This decomposition keeps each target distribution simpler.
+This keeps each target simpler.
 
 ---
 
-## 3.2 Feature filtering
+## 4.3 CatBoost feature set
 
-Feature selection explicitly removes:
+The model is trained on engineered tabular features from `data.csv`.
 
-- identifiers
+Important included groups:
+
+- current ratings
+- snapshot ratings
+- H2H
+- games played
+- global H2H
+- snapshot found flags
+
+Important excluded groups:
+
 - target columns
 - `has_*`
-- old transformed columns like `*_pred_diff`
+- old transformed `*_pred_diff`
 - `snapshot_total_pred_diff`
-- `snapshot_winner_p1`
+- identifiers
 
-This is important because:
+This filtering is deliberate to reduce:
 
-- some columns are redundant
-- some columns are post-match indicators
-- some columns came from older handcrafted transforms not needed by CatBoost
+- redundancy
+- leakage risk
+- dependence on legacy transforms
 
-Implementation pattern:
+---
+
+## 4.4 CatBoost parameters
+
+Typical implementation:
 
 ```python
-if c.endswith("_y_diff"): continue
-if c.endswith("_y_total"): continue
-if c.startswith("has_"): continue
-if "_pred_diff" in c: continue
+CATBOOST_PARAMS = dict(
+    iterations=800,
+    depth=6,
+    learning_rate=0.03,
+    loss_function="MAE",
+    eval_metric="MAE",
+    random_seed=12,
+    verbose=False,
+    l2_leaf_reg=5,
+)
 ```
 
 ---
 
-## 3.3 Training split
+## 4.5 What each CatBoost parameter means
 
-Training uses chronological index-based partitioning.
+### `iterations=800`
 
-Typical logic:
+Number of boosting rounds.
+
+Each iteration adds another tree.
+
+Higher iterations:
+
+- can fit more complex patterns
+- can overfit if too high
+
+---
+
+### `depth=6`
+
+Maximum depth of each decision tree.
+
+Deeper trees:
+
+- capture more interactions
+- are more expressive
+- can overfit more easily
+
+Depth 6 is a moderate setting.
+
+---
+
+### `learning_rate=0.03`
+
+Shrinkage factor on each tree’s contribution.
+
+Smaller learning rate:
+
+- slower learning
+- usually more stable
+- often requires more iterations
+
+  0.03 is a conservative value.
+
+---
+
+### `loss_function="MAE"`
+
+Training objective is mean absolute error.
+
+This makes the model optimize absolute residuals rather than squared residuals.
+
+MAE is more robust to extreme outliers than RMSE.
+
+Since score prediction can occasionally contain noisy or unusual results, MAE is a reasonable choice.
+
+---
+
+### `eval_metric="MAE"`
+
+Validation metric also uses MAE.
+
+So train objective and evaluation metric are aligned.
+
+---
+
+### `random_seed=12`
+
+Controls reproducibility.
+
+Important because boosted trees can depend on random feature / split decisions.
+
+---
+
+### `verbose=False`
+
+Suppresses per-iteration logging.
+
+Purely cosmetic.
+
+---
+
+### `l2_leaf_reg=5`
+
+L2 regularization on leaf values.
+
+This penalizes overly large leaf predictions and helps reduce overfitting.
+
+Higher values:
+
+- smoother model
+- more bias
+- less variance
+
+Lower values:
+
+- more aggressive fitting
+- more variance
+
+---
+
+## 4.6 How CatBoost works on this project
+
+CatBoost ended up learning primarily from:
+
+- raw snapshot ratings
+- raw current ratings
+- some H2H and games played features
+
+When snapshot-derived transformed features were removed, performance stayed strong, which showed:
+
+> the model preferred raw player-level rating inputs over handcrafted transformed versions
+
+That is a sign CatBoost is learning the comparison itself.
+
+---
+
+# 5. Player embedding model
+
+This is the **Tier 2** deep learning model.
+
+It combines:
+
+- learned player representations
+- engineered numeric features
+
+It is implemented in PyTorch.
+
+---
+
+## 5.1 What kind of model it is
+
+The player embedding model is a **feedforward neural network with learned embeddings**.
+
+Per sport, it predicts:
+
+- score difference
+- score total
+
+It is not an RNN or Transformer yet. It is a dense MLP over:
+
+- player identity embeddings
+- engineered numeric inputs
+
+---
+
+## 5.2 Embedding idea
+
+Each player is assigned an integer ID:
 
 ```python
-split = int(len(df) * TRAIN_RATIO)
-train rows: index < split
-test rows: index >= split
+player_to_idx[player_key] = integer
 ```
 
-No random shuffling is used.
+Then the model learns an embedding vector:
+
+```python
+self.embed = nn.Embedding(n_players + 1, embed_dim)
+```
+
+So each player gets a learned dense vector of length `embed_dim`.
+
+Typical value:
+
+```python
+EMBED_DIM = 16
+```
+
+These embeddings allow the model to capture:
+
+- latent player skill
+- style similarity
+- interaction structure not explicitly encoded in features
 
 ---
 
-## 3.4 Prediction outputs
+## 5.3 Model input construction
 
-The CatBoost models predict:
+For a given match, the model retrieves:
 
-- sport diff
-- sport total
+```python
+e1 = embedding(player1)
+e2 = embedding(player2)
+```
 
-These raw outputs are then converted into legal scorelines.
+Then forms the combined input:
+
+```python
+[e1, e2, e1 - e2, e1 * e2, numeric_features]
+```
+
+This is important:
+
+- `e1` = player 1 latent identity
+- `e2` = player 2 latent identity
+- `e1 - e2` = relative latent difference
+- `e1 * e2` = latent interaction term
+
+This structure lets the network learn more than simple difference.
 
 ---
 
-# 4. Tier 2 model implementation
+## 5.4 Numeric feature input
 
-Implemented in:
+The embedding model also uses the same engineered numeric features as the CatBoost model:
+
+- current ratings
+- snapshot ratings
+- H2H
+- games
+- global H2H
+
+So it is a **hybrid model**, not an embedding-only model.
+
+---
+
+## 5.5 MLP architecture
+
+Typical implementation parameters:
+
+```python
+EMBED_DIM = 16
+HIDDEN_DIMS = [128, 64]
+DROPOUT = 0.15
+```
+
+This means:
+
+### Input layer
+
+Dimension:
 
 ```text
-player_embedding_fin.py
+numeric_features + 4 * EMBED_DIM
 ```
 
----
+because of:
 
-## 4.1 Motivation
+- `e1`
+- `e2`
+- `e1 - e2`
+- `e1 * e2`
 
-Tier 2 augments tabular features with learned player embeddings.
+### Hidden layers
 
-Instead of only using engineered comparisons, it also learns a latent vector for each player.
+Two fully connected layers:
 
----
+- 128 units
+- 64 units
 
-## 4.2 Player indexing
+with:
 
-Player keys are mapped to integers using:
-
-```python
-build_player_index(df)
-```
-
-Mapping format:
-
-```python
-{
-    player_key: integer_id
-}
-```
-
-Index `0` is reserved for unknown players.
-
-This mapping is serialized into the saved model package.
-
----
-
-## 4.3 Architecture
-
-Main module:
-
-```python
-class SportEmbeddingNet(nn.Module)
-```
-
-### Inputs
-
-- `p1_idx`
-- `p2_idx`
-- numeric feature vector
-
-### Embedding lookup
-
-```python
-e1 = self.embed(p1_idx)
-e2 = self.embed(p2_idx)
-```
-
-### Combined tensor
-
-The final input to the MLP is:
-
-```python
-torch.cat([e1, e2, e1 - e2, e1 * e2, x_num], dim=1)
-```
-
-This explicitly gives the model:
-
-- each player vector
-- embedding difference
-- embedding interaction
-- engineered numeric features
+- ReLU activation
+- dropout after each layer
 
 ### Output head
 
-The network outputs 2 values:
+Final linear layer outputs 2 values:
 
-```text
-[ predicted_diff , predicted_total ]
-```
-
-One model instance is trained per sport.
+- predicted diff
+- predicted total
 
 ---
 
-## 4.4 Loss
+## 5.6 Player embedding model training parameters
 
-Tier 2 uses:
+Typical settings:
+
+```python
+EPOCHS = 80
+BATCH_SIZE = 512
+LEARNING_RATE = 1e-3
+WEIGHT_DECAY = 1e-4
+EARLY_STOPPING_PATIENCE = 10
+```
+
+---
+
+## 5.7 What these mean
+
+### `EPOCHS = 80`
+
+Maximum full passes over the training set.
+
+Actual training may stop earlier due to early stopping.
+
+---
+
+### `BATCH_SIZE = 512`
+
+Number of training examples per optimizer step.
+
+Large enough for stable gradients, small enough to fit comfortably.
+
+---
+
+### `LEARNING_RATE = 1e-3`
+
+Step size for AdamW.
+
+A standard safe choice for small-to-medium MLPs.
+
+---
+
+### `WEIGHT_DECAY = 1e-4`
+
+L2-style regularization in AdamW.
+
+Helps reduce overfitting in dense layers and embeddings.
+
+---
+
+### `EARLY_STOPPING_PATIENCE = 10`
+
+If validation loss does not improve for 10 epochs, training stops.
+
+This is important because the model can otherwise overfit tabular data.
+
+---
+
+## 5.8 Loss function
+
+The player embedding model uses:
 
 ```python
 nn.SmoothL1Loss()
 ```
 
-Training objective:
+for both outputs.
+
+Total loss:
 
 ```python
 loss = loss_diff + loss_total
 ```
 
-So each sport model is still dual-output, but trained jointly for that sport.
+Smooth L1 is chosen because it is:
+
+- more robust than MSE
+- smoother than pure MAE
+- good for noisy regression targets
 
 ---
 
-## 4.5 Validation / early stopping
+## 5.9 Optimization
 
-Tier 2 uses three chronological regions:
-
-- train
-- validation
-- test
-
-Validation loss is tracked after each epoch.
-
-Best model state is stored in memory:
+Optimizer:
 
 ```python
-best_state = {k: v.detach().cpu().clone() ...}
+torch.optim.AdamW(...)
 ```
 
-Then restored at the end.
+AdamW is used because:
 
-Early stopping uses:
-
-```python
-EARLY_STOPPING_PATIENCE
-```
+- it handles different gradient scales well
+- it works well for embeddings + dense layers
+- weight decay is decoupled cleanly from the optimizer
 
 ---
 
-## 4.6 Normalization
+# 6. Predictor interface
 
-Numeric features are standardized using only the training split:
+Both CatBoost and player embedding models are wrapped in a `PredictorPackage`.
 
-```python
-feat_mean = df_train[feature_cols].mean()
-feat_std = df_train[feature_cols].std().replace(0, 1.0)
-```
-
-These are saved per sport and reused at inference time.
-
----
-
-# 5. Synthetic inference implementation
-
-This is one of the most important engineering parts of the system.
-
-The predictor is not allowed to depend on:
-
-> “the latest direct historical row for the same matchup”
-
-Instead, it must support unseen pairings.
-
----
-
-## 5.1 Core strategy
-
-Build a fresh synthetic row from:
-
-- latest state of player 1
-- latest state of player 2
-- latest pair H2H summary if available
-- neutral H2H defaults otherwise
-
----
-
-## 5.2 Player state extraction
-
-```python
-get_latest_player_state(df, player_name)
-```
-
-This finds the latest row where the player appears, then reorients that row so the player becomes logical `p1`.
-
-This matters because `data.csv` stores many fields relative to `p1`.
-
----
-
-## 5.3 Row orientation
-
-Function:
-
-```python
-orient_row_to_player_as_p1(row, player_name)
-```
-
-This swaps:
-
-- player names / keys
-- `*_rating_p1` vs `*_rating_p2`
-- `*_games_p1` vs `*_games_p2`
-- snapshot p1/p2 fields
-
-and negates directional values:
-
-- `*_rating_diff`
-- `*_games_diff`
-- `*_h2h_avg_diff_p1`
-- `*_snapshot_rating_diff`
-
-and flips winrates:
-
-- `h2h_winrate_p1`
-- `*_h2h_winrate_p1`
-
-This is necessary so that later synthetic construction can safely read “player-local” state from `..._p1`.
-
----
-
-## 5.4 Pair H2H lookup
-
-Function:
-
-```python
-get_latest_pair_h2h_row(df, player1, player2)
-```
-
-If no direct historical matchup exists, returns `None`.
-
-If it exists, the row is also reoriented so `player1` is logical `p1`.
-
----
-
-## 5.5 Synthetic row assembly
-
-Function:
-
-```python
-build_synthetic_match_row(df, player1, player2, feature_cols)
-```
-
-This writes a dictionary containing:
-
-### from player 1 state
-
-- `*_rating_p1`
-- `*_games_p1`
-- `*_snapshot_rating_p1`
-- `*_snapshot_p1_found`
-
-### from player 2 state
-
-- `*_rating_p2`
-- `*_games_p2`
-- `*_snapshot_rating_p2`
-- `*_snapshot_p2_found`
-
-### derived pairwise fields
-
-- `*_rating_diff = rating_p1 - rating_p2`
-- `*_games_diff = games_p1 - games_p2`
-- `*_snapshot_rating_diff = snapshot_rating_p1 - snapshot_rating_p2`
-
-### pair H2H defaults
-
-if no direct pair history exists:
-
-```python
-h2h_games = 0
-h2h_avg_diff_p1 = 0.0
-h2h_winrate_p1 = 0.5
-h2h_days_since_last = np.nan
-```
-
-This lets the predictor operate on hypothetical pairings.
-
----
-
-# 6. Score reconstruction implementation
-
-Models do not directly output valid sport scores.
-
-They output:
-
-- predicted diff
-- predicted total
-
-These must be mapped back into legal scorelines.
-
----
-
-## 6.1 Raw reconstruction
-
-```python
-s1 = 0.5 * (pred_total + pred_diff)
-s2 = 0.5 * (pred_total - pred_diff)
-```
-
-This gives unconstrained sport scores.
-
----
-
-## 6.2 Full-game decoder
-
-Function:
-
-```python
-decode_full_game_score(pred_diff, pred_total)
-```
-
-Used for:
-
-- TT
-- BD
-- SQ
-- optionally TN in independent mode
-
-It forces the sport into:
-
-```text
-21-x  or  x-21
-```
-
-using a blend of:
-
-- reconstructed loser score
-- loser score implied by margin
-
----
-
-## 6.3 Tennis decoder
-
-Function:
-
-```python
-decode_tennis_score(pred_diff, pred_total, running_diff_before_tn)
-```
-
-Supports racketlon stop-rule logic.
-
-The function computes how many points the trailing player needs before tennis starts and truncates the tennis score when the match becomes mathematically decided.
-
----
-
-# 7. Packaging / serialization
-
-Both Tier 1 and Tier 2 save packaged predictors.
-
-For Tier 2, the main bundle contains:
-
-- `state_dicts`
-- `feature_cols`
-- `player_to_idx`
-- per-sport normalization stats
-- architecture config
-- metrics
-
-Serialized file:
-
-```text
-player_embedding_package.pt
-```
-
-Separate snapshot of processed feature table:
-
-```text
-data_snapshot.pkl
-```
-
-This is loaded so inference can reconstruct synthetic rows from the latest player states.
-
----
-
-# 8. Predictor API
-
-The low-level public interface is:
+The common interface is:
 
 ```python
 predictor = PredictorPackage.load(path)
 result = predictor.predict_pair(player1, player2)
 ```
 
-The returned object is a dictionary of the form:
+This is important because it decouples:
 
-```python
-{
-    "player1": ...,
-    "player2": ...,
-    "sports": {
-        "TT": {
-            "score_p1": ...,
-            "score_p2": ...,
-            "pred_diff": ...,
-            "pred_total": ...
-        },
-        ...
-    },
-    "total_p1": ...,
-    "total_p2": ...,
-    "total_diff": ...,
-    "winner": ...
-}
-```
-
-This format is intentionally simple so it can be used by:
-
-- CLI scripts
-- notebooks
-- future web UIs
-- APIs
+- training implementation
+- saved model format
+- downstream usage
 
 ---
 
-# 9. Training artifacts
+# 7. Summary of model roles
 
-Training scripts save:
+## Ratings
 
-- per-sport scatter plots
-- train/validation loss curves
-- match-level scatter plots
-- winner confusion matrix
-- metrics JSON
-- demo prediction JSON
-
-These are generated for analysis and debugging rather than required inference.
-
----
-
-# 10. Current implementation assumptions
-
-## Assumption 1
-
-A player’s latest row in `data.csv` is a valid summary of their latest known state.
-
-## Assumption 2
-
-Pair H2H can be approximated using the latest direct pair row if available.
-
-## Assumption 3
-
-Chronological split is more important than random IID evaluation.
-
-## Assumption 4
-
-Per-sport modeling is preferable to one fully joint output model.
-
----
-
-# 11. Files and roles
-
-## Feature generation
-
-```text
-features_v4.py
-```
-
-Builds `data.csv`.
+- current rating = dynamic sequential form
+- snapshot rating = stable monthly skill
 
 ## Baseline
 
-```text
-baseline.py
-```
+- avg-based
+- linear ridge regression
+- minimal feature set
+- sanity-check benchmark
 
-Simple ridge baseline on minimal running features.
+## CatBoost
 
-## Tier 1
+- gradient boosted decision tree ensemble
+- nonlinear tabular learner
+- strong on engineered structured features
+- uses explicit regularization via tree depth, shrinkage, and `l2_leaf_reg`
 
-```text
-catboost_regressor.py
-```
+## Player embeddings
 
-CatBoost on engineered tabular features.
-
-## Tier 2
-
-```text
-player_embedding_fin.py
-```
-
-PyTorch player-embedding MLP training and packaging.
-
-## Tier 2 inference script
-
-```text
-player_embedding_predict.py
-```
-
-Small front-end wrapper around `PredictorPackage.load(...)`.
+- neural network with learned player vectors
+- combines identity embeddings with engineered numeric features
+- more flexible representation learning
+- higher tuning burden than CatBoost
 
 ---
 
-# 12. Main implementation ideas to preserve
-
-If this project is extended, the most important implementation constraints to preserve are:
-
-1. **No feature leakage**
-2. **Chronological feature construction**
-3. **Synthetic inference for unseen pairings**
-4. **Clear separation between**
-   - raw history
-   - engineered features
-   - trained model package
-
-5. **Stable serialized predictor interface**
-
----
-
-If you want, I can turn this into a polished `README.md` file next, with proper markdown formatting and section hierarchy exactly ready to paste into the repo.
+If you want, I can turn this into a polished `README.md` file with markdown formatting exactly ready to paste into the repo.
