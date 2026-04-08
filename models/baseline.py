@@ -19,7 +19,7 @@ MAX_TOTAL_PER_SPORT = 42
 # -------------------------------------------------
 PREDICT_ONE_MATCH = True
 PLAYER1 = "zain magdon-ismail"
-PLAYER2 = "jonathan gill"
+PLAYER2 = "anant gupta"
 
 DATA_PATH = "data/matches_cleaned.csv"
 TRAIN_RATIO = 0.8
