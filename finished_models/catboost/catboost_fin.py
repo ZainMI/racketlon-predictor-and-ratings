@@ -30,6 +30,7 @@ CATBOOST_PARAMS = dict(
     eval_metric="MAE",
     random_seed=12,
     verbose=False,
+    l2_leaf_reg=5,
 )
 
 
