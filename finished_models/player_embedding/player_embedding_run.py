@@ -4,7 +4,7 @@ predictor = PredictorPackage.load(
     "finished_models/player_embedding/artifacts/predictor_package"
 )
 
-player1 = "zain magdon-ismail"
+player1 = "bastian böhm"
 player2 = "luke griffiths"
 
 

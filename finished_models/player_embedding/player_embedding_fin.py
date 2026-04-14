@@ -1,5 +1,6 @@
 import json
 import random
+import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -18,8 +19,9 @@ MAX_DIFF_PER_SPORT = 21
 MAX_TOTAL_PER_SPORT = 42
 BASE = 0.0
 
-# -------------------- Tunable config --------------------
+# -------------------- Config --------------------
 DATA_PATH = "data/data.csv"
+INFERENCE_STATE_PATH = "data/inference_state.pkl"
 OUTPUT_DIR = "finished_models/player_embedding/artifacts/predictor_package"
 
 TRAIN_RATIO = 0.8
@@ -41,6 +43,13 @@ EARLY_STOPPING_PATIENCE = 10
 
 DEMO_PLAYER1 = "zain magdon-ismail"
 DEMO_PLAYER2 = "patrick moran"
+
+ALPHAS = {
+    "TT": 0.060,
+    "BD": 0.080,
+    "SQ": 0.060,
+    "TN": 0.040,
+}
 
 
 def ensure_dir(path):
@@ -68,20 +77,23 @@ def read_data(path: str) -> pd.DataFrame:
     return df
 
 
+def load_inference_state(path: str):
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
 def get_feature_columns(df: pd.DataFrame) -> List[str]:
     drop_exact = {
         "match_index",
         "datetime",
         "month_key",
-        "snapshot_key",
         "p1_name",
         "p2_name",
         "p1_key",
         "p2_key",
         "y_total_diff",
         "y_winner_p1",
-        "snapshot_winner_p1",
-        "snapshot_total_pred_diff",
+        "rating_winner_p1",
     }
     feature_cols = []
     for c in df.columns:
@@ -91,10 +103,61 @@ def get_feature_columns(df: pd.DataFrame) -> List[str]:
             continue
         if c.startswith("has_"):
             continue
-        if "_pred_diff" in c:
-            continue
         feature_cols.append(c)
     return sorted(feature_cols)
+
+
+def get_compact_feature_cols(df: pd.DataFrame, sport: str) -> List[str]:
+    wanted = [
+        f"{sport}_rating_p1",
+        f"{sport}_rating_p2",
+        f"{sport}_rating_diff",
+        f"{sport}_pred_diff",
+        f"{sport}_games_p1",
+        f"{sport}_games_p2",
+        f"{sport}_games_diff",
+        f"{sport}_days_since_last_p1",
+        f"{sport}_days_since_last_p2",
+        f"{sport}_time_mult_p1",
+        f"{sport}_time_mult_p2",
+        f"{sport}_time_mult_diff",
+        "h2h_games",
+        "h2h_avg_diff_p1",
+        "h2h_winrate_p1",
+        "h2h_days_since_last",
+        f"{sport}_h2h_games",
+        f"{sport}_h2h_avg_diff_p1",
+        f"{sport}_h2h_winrate_p1",
+        f"{sport}_h2h_days_since_last",
+        f"{sport}_p1_recent_diff_mean_10",
+        f"{sport}_p2_recent_diff_mean_10",
+        f"{sport}_diff_mean_10_diff_p1_p2",
+        f"{sport}_p1_recent_resid_mean_10",
+        f"{sport}_p2_recent_resid_mean_10",
+        f"{sport}_resid_mean_10_diff_p1_p2",
+        f"{sport}_p1_recent_blowout_win_rate_10",
+        f"{sport}_p2_recent_blowout_win_rate_10",
+        f"{sport}_blowout_win_rate_10_diff_p1_p2",
+        f"{sport}_p1_recent_diff_std_10",
+        f"{sport}_p2_recent_diff_std_10",
+        f"{sport}_diff_std_10_diff_p1_p2",
+        f"{sport}_p1_recent_momentum_diff_5_20",
+        f"{sport}_p2_recent_momentum_diff_5_20",
+        f"{sport}_momentum_diff_5_20_diff_p1_p2",
+        f"{sport}_p1_long_n",
+        f"{sport}_p2_long_n",
+        f"{sport}_long_n_diff_p1_p2",
+        f"{sport}_p1_long_diff_mean",
+        f"{sport}_p2_long_diff_mean",
+        f"{sport}_long_diff_mean_diff_p1_p2",
+        f"{sport}_p1_long_total_mean",
+        f"{sport}_p2_long_total_mean",
+        f"{sport}_long_total_mean_diff_p1_p2",
+        f"{sport}_p1_long_winrate",
+        f"{sport}_p2_long_winrate",
+        f"{sport}_long_winrate_diff_p1_p2",
+    ]
+    return [c for c in wanted if c in df.columns]
 
 
 def build_player_index(df: pd.DataFrame) -> Dict[str, int]:
@@ -103,6 +166,10 @@ def build_player_index(df: pd.DataFrame) -> Dict[str, int]:
         | set(df["p2_key"].dropna().tolist())
     )
     return {p: i + 1 for i, p in enumerate(players)}
+
+
+def rating_to_score_diff(x: float, alpha: float) -> float:
+    return MAX_DIFF_PER_SPORT * np.tanh((alpha * x) / 2.0)
 
 
 def reconstruct_scores(pred_diff, pred_total):
@@ -182,110 +249,53 @@ def decode_tennis_score(
     return 21, max(0, 21 - p1_needed)
 
 
-def orient_row_to_player_as_p1(row: pd.Series, player_name: str) -> pd.Series:
-    player_name = player_name.strip().lower()
-    out = row.copy()
-    if out["p1_name"] == player_name:
-        return out
-    if out["p2_name"] != player_name:
-        raise ValueError(f"Player '{player_name}' not found in supplied row.")
-
-    for a, b in [("p1_name", "p2_name"), ("p1_key", "p2_key")]:
-        if a in out.index and b in out.index:
-            out[a], out[b] = out[b], out[a]
-
-    if "h2h_avg_diff_p1" in out.index and pd.notna(out["h2h_avg_diff_p1"]):
-        out["h2h_avg_diff_p1"] = -out["h2h_avg_diff_p1"]
-    if "h2h_winrate_p1" in out.index and pd.notna(out["h2h_winrate_p1"]):
-        out["h2h_winrate_p1"] = 1.0 - out["h2h_winrate_p1"]
-
-    for sport in SPORTS:
-        for a, b in [
-            (f"{sport}_rating_p1", f"{sport}_rating_p2"),
-            (f"{sport}_games_p1", f"{sport}_games_p2"),
-            (f"{sport}_snapshot_rating_p1", f"{sport}_snapshot_rating_p2"),
-            (f"{sport}_snapshot_p1_found", f"{sport}_snapshot_p2_found"),
-        ]:
-            if a in out.index and b in out.index:
-                out[a], out[b] = out[b], out[a]
-
-        for col in [
-            f"{sport}_rating_diff",
-            f"{sport}_games_diff",
-            f"{sport}_h2h_avg_diff_p1",
-            f"{sport}_snapshot_rating_diff",
-        ]:
-            if col in out.index and pd.notna(out[col]):
-                out[col] = -out[col]
-
-        wr = f"{sport}_h2h_winrate_p1"
-        if wr in out.index and pd.notna(out[wr]):
-            out[wr] = 1.0 - out[wr]
-    return out
-
-
-def get_latest_player_state(df: pd.DataFrame, player_name: str) -> pd.Series:
-    player_name = player_name.strip().lower()
-    mask = (df["p1_name"] == player_name) | (df["p2_name"] == player_name)
-    candidates = df[mask]
-    if candidates.empty:
-        raise ValueError(f"No history found for player '{player_name}'")
-    row = candidates.iloc[-1].copy()
-    return orient_row_to_player_as_p1(row, player_name)
-
-
-def get_latest_pair_h2h_row(df: pd.DataFrame, player1: str, player2: str):
-    p1 = player1.strip().lower()
-    p2 = player2.strip().lower()
-    mask_direct = (df["p1_name"] == p1) & (df["p2_name"] == p2)
-    mask_reverse = (df["p1_name"] == p2) & (df["p2_name"] == p1)
-    candidates = df[mask_direct | mask_reverse]
-    if candidates.empty:
-        return None
-    row = candidates.iloc[-1].copy()
-    return orient_row_to_player_as_p1(row, p1)
-
-
 def build_synthetic_match_row(
-    df: pd.DataFrame, player1: str, player2: str, feature_cols: List[str]
+    inference_state: dict,
+    player1: str,
+    player2: str,
+    feature_cols: List[str],
 ) -> pd.Series:
     p1 = player1.strip().lower()
     p2 = player2.strip().lower()
+
     if p1 == p2:
         raise ValueError("PLAYER1 and PLAYER2 must be different.")
-    s1 = get_latest_player_state(df, p1)
-    s2 = get_latest_player_state(df, p2)
-    pair_row = get_latest_pair_h2h_row(df, p1, p2)
+
+    player_states = inference_state["player_states_by_name"]
+    if p1 not in player_states:
+        raise ValueError(f"No history found for player '{player1}'")
+    if p2 not in player_states:
+        raise ValueError(f"No history found for player '{player2}'")
+
+    s1 = player_states[p1]
+    s2 = player_states[p2]
 
     row = {}
-    row["snapshot_found"] = float(
-        max(
-            int(
-                s1.get("snapshot_found", 0)
-                if pd.notna(s1.get("snapshot_found", 0))
-                else 0
-            ),
-            int(
-                s2.get("snapshot_found", 0)
-                if pd.notna(s2.get("snapshot_found", 0))
-                else 0
-            ),
-        )
-    )
+
     row["h2h_games"] = 0.0
     row["h2h_avg_diff_p1"] = 0.0
     row["h2h_winrate_p1"] = 0.5
-    row["h2h_days_since_last"] = np.nan
+    row["h2h_days_since_last"] = 9999.0
 
-    if pair_row is not None:
-        for col in [
-            "h2h_games",
-            "h2h_avg_diff_p1",
-            "h2h_winrate_p1",
-            "h2h_days_since_last",
-        ]:
-            if col in pair_row.index:
-                row[col] = pair_row[col]
+    pk = (p1, p2) if p1 <= p2 else (p2, p1)
+    pair_h2h = inference_state["pair_h2h"].get(pk)
+
+    if pair_h2h is not None:
+        overall = pair_h2h["overall"]
+        a_name = pair_h2h["a_name"]
+        b_name = pair_h2h["b_name"]
+
+        row["h2h_games"] = overall["h2h_games"]
+        row["h2h_days_since_last"] = float(
+            overall.get("h2h_days_since_last", 9999.0)
+        )
+
+        if p1 == a_name and p2 == b_name:
+            row["h2h_avg_diff_p1"] = overall["h2h_avg_diff_p1"]
+            row["h2h_winrate_p1"] = overall["h2h_winrate_p1"]
+        else:
+            row["h2h_avg_diff_p1"] = -overall["h2h_avg_diff_p1"]
+            row["h2h_winrate_p1"] = 1.0 - overall["h2h_winrate_p1"]
 
     for sport in SPORTS:
         r1 = float(s1.get(f"{sport}_rating_p1", BASE))
@@ -296,45 +306,87 @@ def build_synthetic_match_row(
         row[f"{sport}_rating_p1"] = r1
         row[f"{sport}_rating_p2"] = r2
         row[f"{sport}_rating_diff"] = r1 - r2
+        row[f"{sport}_pred_diff"] = float(
+            rating_to_score_diff(row[f"{sport}_rating_diff"], ALPHAS[sport])
+        )
         row[f"{sport}_games_p1"] = g1
         row[f"{sport}_games_p2"] = g2
         row[f"{sport}_games_diff"] = g1 - g2
 
-        sr1 = float(s1.get(f"{sport}_snapshot_rating_p1", 0.0))
-        sr2 = float(s2.get(f"{sport}_snapshot_rating_p1", 0.0))
-        sf1 = int(
-            s1.get(f"{sport}_snapshot_p1_found", 0)
-            if pd.notna(s1.get(f"{sport}_snapshot_p1_found", 0))
-            else 0
+        row[f"{sport}_days_since_last_p1"] = float(
+            s1.get(f"{sport}_days_since_last_p1", 0.0)
         )
-        sf2 = int(
-            s2.get(f"{sport}_snapshot_p1_found", 0)
-            if pd.notna(s2.get(f"{sport}_snapshot_p1_found", 0))
-            else 0
+        row[f"{sport}_days_since_last_p2"] = float(
+            s2.get(f"{sport}_days_since_last_p1", 0.0)
         )
-
-        row[f"{sport}_snapshot_rating_p1"] = sr1
-        row[f"{sport}_snapshot_rating_p2"] = sr2
-        row[f"{sport}_snapshot_rating_diff"] = sr1 - sr2
-        row[f"{sport}_snapshot_p1_found"] = sf1
-        row[f"{sport}_snapshot_p2_found"] = sf2
+        row[f"{sport}_time_mult_p1"] = float(
+            s1.get(f"{sport}_time_mult_p1", 1.0)
+        )
+        row[f"{sport}_time_mult_p2"] = float(
+            s2.get(f"{sport}_time_mult_p1", 1.0)
+        )
+        row[f"{sport}_time_mult_diff"] = (
+            row[f"{sport}_time_mult_p1"] - row[f"{sport}_time_mult_p2"]
+        )
 
         row[f"{sport}_h2h_games"] = 0.0
         row[f"{sport}_h2h_avg_diff_p1"] = 0.0
         row[f"{sport}_h2h_winrate_p1"] = 0.5
-        row[f"{sport}_h2h_days_since_last"] = np.nan
+        row[f"{sport}_h2h_days_since_last"] = 9999.0
 
-        if pair_row is not None:
-            for col in [
-                f"{sport}_h2h_games",
-                f"{sport}_h2h_avg_diff_p1",
-                f"{sport}_h2h_winrate_p1",
-                f"{sport}_h2h_days_since_last",
-            ]:
-                if col in pair_row.index:
-                    row[col] = pair_row[col]
+        if pair_h2h is not None:
+            sport_h = pair_h2h["sports"][sport]
+            a_name = pair_h2h["a_name"]
+            b_name = pair_h2h["b_name"]
 
-    return pd.Series({c: row.get(c, np.nan) for c in feature_cols})
+            row[f"{sport}_h2h_games"] = sport_h[f"{sport}_h2h_games"]
+            row[f"{sport}_h2h_days_since_last"] = float(
+                sport_h.get(f"{sport}_h2h_days_since_last", 9999.0)
+            )
+
+            if p1 == a_name and p2 == b_name:
+                row[f"{sport}_h2h_avg_diff_p1"] = sport_h[
+                    f"{sport}_h2h_avg_diff_p1"
+                ]
+                row[f"{sport}_h2h_winrate_p1"] = sport_h[
+                    f"{sport}_h2h_winrate_p1"
+                ]
+            else:
+                row[f"{sport}_h2h_avg_diff_p1"] = -sport_h[
+                    f"{sport}_h2h_avg_diff_p1"
+                ]
+                row[f"{sport}_h2h_winrate_p1"] = (
+                    1.0 - sport_h[f"{sport}_h2h_winrate_p1"]
+                )
+
+        recent_suffixes = [
+            "diff_mean_10",
+            "resid_mean_10",
+            "blowout_win_rate_10",
+            "diff_std_10",
+            "momentum_diff_5_20",
+        ]
+        for suffix in recent_suffixes:
+            p1_col = f"{sport}_p1_recent_{suffix}"
+            p2_col = f"{sport}_p2_recent_{suffix}"
+            row[p1_col] = float(s1.get(p1_col, 0.0))
+            row[p2_col] = float(s2.get(p2_col, 0.0))
+            row[f"{sport}_{suffix}_diff_p1_p2"] = row[p1_col] - row[p2_col]
+
+        long_suffixes = [
+            "long_n",
+            "long_diff_mean",
+            "long_total_mean",
+            "long_winrate",
+        ]
+        for suffix in long_suffixes:
+            p1_col = f"{sport}_p1_{suffix}"
+            p2_col = f"{sport}_p2_{suffix}"
+            row[p1_col] = float(s1.get(p1_col, 0.0))
+            row[p2_col] = float(s2.get(p2_col, 0.0))
+            row[f"{sport}_{suffix}_diff_p1_p2"] = row[p1_col] - row[p2_col]
+
+    return pd.Series({c: row.get(c, 0.0) for c in feature_cols})
 
 
 class SportEmbeddingNet(nn.Module):
@@ -361,7 +413,13 @@ class SportEmbeddingNet(nn.Module):
         return self.head(z)
 
 
-def to_tensor_batch(df_slice, feature_cols, player_to_idx, feat_mean, feat_std):
+def to_tensor_batch(
+    df_slice: pd.DataFrame,
+    feature_cols: List[str],
+    player_to_idx: Dict[str, int],
+    feat_mean: pd.Series,
+    feat_std: pd.Series,
+):
     p1_idx = torch.tensor(
         [player_to_idx.get(x, 0) for x in df_slice["p1_key"].tolist()],
         dtype=torch.long,
@@ -391,24 +449,29 @@ def iterate_minibatches(n, batch_size):
 class PredictorPackage:
     models: Dict[str, nn.Module]
     model_meta: Dict[str, dict]
-    feature_cols: List[str]
+    feature_cols_by_sport: Dict[str, List[str]]
     player_to_idx: Dict[str, int]
-    df: pd.DataFrame
+    inference_state: dict
 
     @classmethod
     def load(cls, directory: str | Path):
         directory = Path(directory)
         bundle = torch.load(
-            directory / "player_embedding_package.pt", map_location=DEVICE
+            directory / "player_embedding_package.pt",
+            map_location=DEVICE,
+            weights_only=False,
         )
-        df = pd.read_pickle(directory / "data_snapshot.pkl")
+
+        with open(directory / "inference_state.pkl", "rb") as f:
+            inference_state = pickle.load(f)
 
         models = {}
         for sport in bundle["sports"]:
             cfg = bundle["config"]
+            feat_cols = bundle["feature_cols_by_sport"][sport]
             model = SportEmbeddingNet(
                 n_players=bundle["n_players"],
-                n_features=len(bundle["feature_cols"]),
+                n_features=len(feat_cols),
                 embed_dim=cfg["embed_dim"],
             ).to(DEVICE)
             model.load_state_dict(bundle["state_dicts"][sport])
@@ -418,30 +481,18 @@ class PredictorPackage:
         return cls(
             models=models,
             model_meta=bundle["model_meta"],
-            feature_cols=bundle["feature_cols"],
+            feature_cols_by_sport=bundle["feature_cols_by_sport"],
             player_to_idx=bundle["player_to_idx"],
-            df=df,
+            inference_state=inference_state,
         )
 
     def get_player_key(self, player_name: str) -> str:
         player_name = player_name.strip().lower()
-        mask = (self.df["p1_name"] == player_name) | (
-            self.df["p2_name"] == player_name
-        )
-        candidates = self.df[mask]
-        if candidates.empty:
+        if player_name not in self.inference_state["player_states_by_name"]:
             raise ValueError(f"No history found for player '{player_name}'")
-        row = candidates.iloc[-1]
-        return row["p1_key"] if row["p1_name"] == player_name else row["p2_key"]
+        return player_name
 
     def predict_pair(self, player1: str, player2: str) -> dict:
-        row = build_synthetic_match_row(
-            self.df, player1, player2, self.feature_cols
-        )
-        one_row = pd.DataFrame([row.to_dict()])
-        one_row["p1_key"] = self.get_player_key(player1)
-        one_row["p2_key"] = self.get_player_key(player2)
-
         total_p1 = 0
         total_p2 = 0
         sports_out = {}
@@ -450,13 +501,21 @@ class PredictorPackage:
             if sport not in self.models:
                 continue
 
+            feat_cols = self.feature_cols_by_sport[sport]
+            row = build_synthetic_match_row(
+                self.inference_state, player1, player2, feat_cols
+            )
+            one_row = pd.DataFrame([row.to_dict()]).fillna(0.0)
+            one_row["p1_key"] = self.get_player_key(player1)
+            one_row["p2_key"] = self.get_player_key(player2)
+
             meta = self.model_meta[sport]
             feat_mean = pd.Series(meta["feat_mean"])
             feat_std = pd.Series(meta["feat_std"])
 
             p1_idx, p2_idx, x_num = to_tensor_batch(
                 one_row,
-                self.feature_cols,
+                feat_cols,
                 self.player_to_idx,
                 feat_mean,
                 feat_std,
@@ -584,7 +643,9 @@ def train_one_sport_model(
         device=DEVICE,
     )
     y_val = torch.tensor(
-        df_val[[diff_col, total_col]].values, dtype=torch.float32, device=DEVICE
+        df_val[[diff_col, total_col]].values,
+        dtype=torch.float32,
+        device=DEVICE,
     )
 
     p1_train, p2_train, x_train = to_tensor_batch(
@@ -676,7 +737,7 @@ def main():
     plots_dir = ensure_dir(outdir / "plots")
 
     df = read_data(DATA_PATH)
-    feature_cols = get_feature_columns(df)
+    inference_state = load_inference_state(INFERENCE_STATE_PATH)
     player_to_idx = build_player_index(df)
 
     n = len(df)
@@ -685,18 +746,20 @@ def main():
 
     print(f"Device: {DEVICE}")
     print(f"Rows: {n}")
-    print(f"Features: {len(feature_cols)}")
     print(f"Train end: {split_train}")
     print(f"Val end:   {split_val}")
 
     models = {}
     model_meta = {}
+    feature_cols_by_sport = {}
     total_pred_p1 = np.zeros(len(df))
     total_pred_p2 = np.zeros(len(df))
 
     for sport in SPORTS:
         diff_col = f"{sport}_y_diff"
         total_col = f"{sport}_y_total"
+        feat_cols = get_compact_feature_cols(df, sport)
+
         mask = df[diff_col].notna() & df[total_col].notna()
         rows = np.where(mask.values)[0]
         if len(rows) < 50:
@@ -704,7 +767,13 @@ def main():
             continue
 
         model, meta = train_one_sport_model(
-            sport, df, rows, feature_cols, player_to_idx, split_train, split_val
+            sport,
+            df,
+            rows,
+            feat_cols,
+            player_to_idx,
+            split_train,
+            split_val,
         )
 
         print(f"\n{sport} TEST RESULTS")
@@ -736,6 +805,7 @@ def main():
 
         models[sport] = model
         model_meta[sport] = meta
+        feature_cols_by_sport[sport] = feat_cols
 
         for i, row_idx in enumerate(meta["rows_test"]):
             pdiff = meta["pred_diff"][i]
@@ -791,7 +861,7 @@ def main():
 
     bundle = {
         "sports": list(models.keys()),
-        "feature_cols": feature_cols,
+        "feature_cols_by_sport": feature_cols_by_sport,
         "player_to_idx": player_to_idx,
         "n_players": max(player_to_idx.values()) if player_to_idx else 0,
         "config": {
@@ -809,6 +879,7 @@ def main():
                     "train_n": model_meta[s]["train_n"],
                     "val_n": model_meta[s]["val_n"],
                     "test_n": model_meta[s]["test_n"],
+                    "n_features": len(feature_cols_by_sport[s]),
                 }
                 for s in model_meta
             },
@@ -820,7 +891,9 @@ def main():
     }
 
     torch.save(bundle, outdir / "player_embedding_package.pt")
-    df.to_pickle(outdir / "data_snapshot.pkl")
+
+    with open(outdir / "inference_state.pkl", "wb") as f:
+        pickle.dump(inference_state, f)
 
     with open(outdir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(bundle["metrics"], f, indent=2)
