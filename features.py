@@ -1,52 +1,85 @@
-# features_v4.py
+# features.py
 #
 # Builds a SINGLE training-ready dataset with:
-# - leakage-safe pre-match features (margin-Elo + H2H up to that point)
-# - monthly snapshot rating features computed directly from raw matches
-# - explicit per-player current ratings for synthetic future matchup construction
-# - targets:
-#     * per-sport diffs      -> {SPORT}_y_diff
-#     * per-sport totals     -> {SPORT}_y_total
-#     * match total diff     -> y_total_diff
-#     * match winner         -> y_winner_p1
+# - leakage-safe pre-match features
+# - ONE recency-sensitive rating per player per sport
+# - no snapshot ratings
+# - H2H features
+# - recent-form / dominance / volatility / residual features
+# - long-term shrunk performance features
+# - targets
+# - FINAL POST-HISTORY INFERENCE STATE for synthetic future matchups
 #
-# Output: data/data.csv
+# Outputs:
+#   data/data.csv
+#   data/inference_state.pkl
 
 import math
-import copy
-from collections import defaultdict
-from dataclasses import dataclass
+import pickle
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from typing import Dict, Tuple, Optional, List
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize_scalar
 
 SPORTS = ["TT", "BD", "SQ", "TN"]
-SPORTS_LOWER = ["tt", "bd", "sq", "tn"]
-SPORT_UPPER_TO_LOWER = {"TT": "tt", "BD": "bd", "SQ": "sq", "TN": "tn"}
 
-# -----------------------
+# =================================================
 # Identity config
-# -----------------------
-USE_IDS = True  # recommended; uses team*_player_ids as identity key if present
+# =================================================
+USE_IDS = False
 
-# -----------------------
-# Margin-Elo config
-# -----------------------
+# =================================================
+# One-rating-per-sport config
+# =================================================
 BASE = 0.0
 MAX_DIFF = 21.0
 
-# pred_diff = 21 * tanh(alpha*(r1-r2)/2)
-ALPHAS = {"TT": 0.010, "BD": 0.010, "SQ": 0.010, "TN": 0.010}
+ALPHAS = {
+    "TT": 0.060,
+    "BD": 0.080,
+    "SQ": 0.060,
+    "TN": 0.040,
+}
 
-# Learning-rate schedule (dynamic)
-ETA_MIN = 0.02
-ETA_MAX = 0.20
-ETA_TAU = 15.0
-
-# small regularization on rating differences
+ETA_MIN = 0.04
+ETA_MAX = 0.30
+ETA_TAU = 20.0
 L2 = 1e-5
+
+MARGIN_MULT_BY_SPORT = {
+    "TT": 0.6,
+    "BD": 0.8,
+    "SQ": 0.6,
+    "TN": 0.4,
+}
+
+# Longer inactivity => next match updates rating more.
+# Rating itself does NOT shrink.
+TIME_C = {
+    "TT": 0.6,
+    "BD": 0.7,
+    "SQ": 0.6,
+    "TN": 0.5,
+}
+
+TIME_TAU_DAYS = {
+    "TT": 90.0,
+    "BD": 120.0,
+    "SQ": 90.0,
+    "TN": 120.0,
+}
+
+# =================================================
+# Feature config
+# =================================================
+BLOWOUT_WIN_THRESHOLD = 10.0
+BLOWOUT_LOSS_THRESHOLD = -10.0
+CLOSE_MATCH_ABS_THRESHOLD = 3.0
+FAVORITE_EXPECTED_DIFF_THRESHOLD = 5.0
+EWM_ALPHA = 0.25
+LONG_TERM_SHRINK = 10.0
 
 
 # =================================================
@@ -68,16 +101,20 @@ def safe_datetime(df: pd.DataFrame) -> pd.Series:
     return d
 
 
+def normalize_player_name(x) -> str:
+    return str(x).strip().lower()
+
+
 def player_key(row: pd.Series, side: int) -> str:
     if USE_IDS:
         col = f"team{side}_player_ids"
         if col in row and not pd.isna(row[col]):
-            return str(row[col])
-    return str(row.get(f"team{side}_players", "")).strip().lower()
+            return str(row[col]).strip()
+    return normalize_player_name(row.get(f"team{side}_players", ""))
 
 
 def player_name(row: pd.Series, side: int) -> str:
-    return str(row.get(f"team{side}_players", "")).strip().lower()
+    return normalize_player_name(row.get(f"team{side}_players", ""))
 
 
 def pair_key(a: str, b: str) -> Tuple[str, str]:
@@ -106,13 +143,6 @@ def get_month_key(dt: pd.Timestamp) -> Optional[str]:
     return f"{dt.year:04d}-{dt.month:02d}"
 
 
-def previous_month(year: int, month: int) -> Tuple[int, int]:
-    month -= 1
-    if month == 0:
-        return year - 1, 12
-    return year, month
-
-
 def clip_diff(d: float) -> float:
     return float(np.clip(d, -MAX_DIFF, MAX_DIFF))
 
@@ -131,337 +161,241 @@ def eta_eff(games_played: int) -> float:
     return ETA_MIN + (ETA_MAX - ETA_MIN) * math.exp(-gp / ETA_TAU)
 
 
-# =================================================
-# Old monthly-ratings logic, adapted to raw CSV
-# =================================================
-def row_to_old_match_format(row: pd.Series) -> dict:
-    return {
-        "p1": player_name(row, 1),
-        "p2": player_name(row, 2),
-        "tt_p1": row.get("TT_p1"),
-        "tt_p2": row.get("TT_p2"),
-        "bd_p1": row.get("BD_p1"),
-        "bd_p2": row.get("BD_p2"),
-        "sq_p1": row.get("SQ_p1"),
-        "sq_p2": row.get("SQ_p2"),
-        "tn_p1": row.get("TN_p1"),
-        "tn_p2": row.get("TN_p2"),
-        "date": (
-            row["datetime"].to_pydatetime()
-            if pd.notna(row["datetime"])
-            else None
-        ),
-    }
-
-
-def compute_history(player, date, history, within):
-    matches = history.get(player, [])
-
-    tt = bd = sq = tn = 0.0
-    tennis_null = 0
-    used = 0
-
-    for row in matches:
-        if row["date"] is None or date is None:
-            continue
-        if row["date"] > date:
-            continue
-
-        max_history = pd.Timedelta(days=within * 365)
-        if pd.Timestamp(date) - pd.Timestamp(row["date"]) > max_history:
-            continue
-
-        slot = "p1" if row["p1"] == player else "p2"
-        op_slot = "p2" if slot == "p1" else "p1"
-
-        tt += float(row[f"tt_{slot}"] or 0) - float(row[f"tt_{op_slot}"] or 0)
-        bd += float(row[f"bd_{slot}"] or 0) - float(row[f"bd_{op_slot}"] or 0)
-        sq += float(row[f"sq_{slot}"] or 0) - float(row[f"sq_{op_slot}"] or 0)
-
-        if (
-            row[f"tn_{slot}"] is None
-            or row[f"tn_{op_slot}"] is None
-            or pd.isna(row[f"tn_{slot}"])
-            or pd.isna(row[f"tn_{op_slot}"])
-        ):
-            tennis_null += 1
-        else:
-            tn += float(row[f"tn_{slot}"]) - float(row[f"tn_{op_slot}"])
-
-        used += 1
-
-    tn_count = used - tennis_null
-    if used == 0:
-        return {"tt": 0.0, "bd": 0.0, "sq": 0.0, "tn": 0.0}
-
-    return {
-        "tt": tt / used,
-        "bd": bd / used,
-        "sq": sq / used,
-        "tn": tn / (tn_count + 1e-13),
-    }
-
-
-def calculate_weight(match_date, ref_date, half_life=365):
-    if match_date is None or ref_date is None:
+def days_since(last_dt: Optional[pd.Timestamp], dt: pd.Timestamp) -> float:
+    if last_dt is None or pd.isna(last_dt) or pd.isna(dt):
         return 0.0
-    delta_days = (ref_date - match_date).days
-    if delta_days < 0:
-        return 0.0
-    decay_rate = np.log(2) / half_life
-    return np.exp(-decay_rate * delta_days)
+    return float(max(0, (dt - last_dt).days))
 
 
-def old_get_diff_by_sport(sport, row):
-    p1_score = row.get(f"{sport}_p1")
-    p2_score = row.get(f"{sport}_p2")
-    if (
-        p1_score is None
-        or p2_score is None
-        or pd.isna(p1_score)
-        or pd.isna(p2_score)
-    ):
-        return 0.0
-    return float(p1_score) - float(p2_score)
-
-
-def get_rating_diff(r1, r2):
-    return {
-        sport: float(r1[sport]) - float(r2[sport]) for sport in SPORTS_LOWER
-    }
-
-
-def get_actual_diff_old(row):
-    return {
-        "tt": old_get_diff_by_sport("tt", row),
-        "bd": old_get_diff_by_sport("bd", row),
-        "sq": old_get_diff_by_sport("sq", row),
-        "tn": old_get_diff_by_sport("tn", row),
-    }
-
-
-def compute_error(actual_diff, expected_diff):
-    return {
-        sport: actual_diff[sport] - expected_diff[sport]
-        for sport in actual_diff
-    }
-
-
-def get_eta(match_count, base_eta=1.0):
-    scale = base_eta / np.sqrt(1 + match_count)
-    return {"tt": scale, "bd": scale, "sq": scale, "tn": scale}
-
-
-def update_all_ratings(train_data, ratings, history, ref_date, base_eta=1.0):
-    match_counts = defaultdict(int)
-
-    for row in train_data:
-        p1 = row["p1"]
-        p2 = row["p2"]
-
-        for player in [p1, p2]:
-            if player not in ratings:
-                his = compute_history(player, ref_date, history, within=100)
-                ratings[player] = {
-                    "tt": his["tt"],
-                    "bd": his["bd"],
-                    "sq": his["sq"],
-                    "tn": his["tn"],
-                }
-
-        r1 = ratings[p1]
-        r2 = ratings[p2]
-
-        actual_diff = get_actual_diff_old(row)
-        expected_diff = get_rating_diff(r1, r2)
-        error = compute_error(actual_diff, expected_diff)
-
-        weight = calculate_weight(row["date"], ref_date)
-
-        eta_p1 = get_eta(match_counts[p1], base_eta)
-        eta_p2 = get_eta(match_counts[p2], base_eta)
-
-        movement_p1 = {
-            sport: weight * eta_p1[sport] * error[sport] for sport in error
-        }
-        movement_p2 = {
-            sport: -weight * eta_p2[sport] * error[sport] for sport in error
-        }
-
-        ratings[p1] = {sport: r1[sport] + movement_p1[sport] for sport in r1}
-        ratings[p2] = {sport: r2[sport] + movement_p2[sport] for sport in r2}
-
-        match_counts[p1] += 1
-        match_counts[p2] += 1
-
-
-def loss_fn(alpha, x, y):
-    pred = rating_to_score_diff_vec(x, alpha)
-    return np.mean((pred - y) ** 2)
-
-
-def rating_to_score_diff_vec(x, alpha):
-    return 21 * (1 - np.exp(-alpha * x)) / (1 + np.exp(-alpha * x))
-
-
-def best_alpha(train_data, ratings):
-    x = {"tt": [], "bd": [], "sq": [], "tn": []}
-    y = {"tt": [], "bd": [], "sq": [], "tn": []}
-
-    for row in train_data:
-        p1 = row["p1"]
-        p2 = row["p2"]
-        if p1 not in ratings or p2 not in ratings:
-            continue
-
-        ex = get_rating_diff(ratings[p1], ratings[p2])
-        ac = get_actual_diff_old(row)
-
-        for sport in x:
-            x[sport].append(ex[sport])
-            y[sport].append(ac[sport])
-
-    ret = {}
-    for sport in x:
-        if len(x[sport]) == 0:
-            ret[sport] = 0.01
-            continue
-
-        res = minimize_scalar(
-            loss_fn,
-            bounds=(0.001, 2),
-            args=(np.array(x[sport]), np.array(y[sport])),
-            method="bounded",
-        )
-        ret[sport] = float(res.x)
-
-    return ret
-
-
-def build_ratings_by_month_from_matches(df: pd.DataFrame):
-    all_matches = [row_to_old_match_format(r) for _, r in df.iterrows()]
-    all_matches = sorted(all_matches, key=lambda x: x["date"])
-
-    history = defaultdict(list)
-    for row in all_matches:
-        history[row["p1"]].append(row)
-        history[row["p2"]].append(row)
-
-    ratings_by_month = defaultdict(
-        lambda: {"tt": 0.0, "bd": 0.0, "sq": 0.0, "tn": 0.0}
+def time_multiplier(sport: str, gap_days: float) -> float:
+    return 1.0 + TIME_C[sport] * (
+        1.0 - math.exp(-gap_days / TIME_TAU_DAYS[sport])
     )
-    monthly_matches = defaultdict(list)
 
-    for row in all_matches:
-        year_month = (row["date"].year, row["date"].month)
-        monthly_matches[year_month].append(row)
 
-    sorted_months = sorted(monthly_matches.keys())
-    grouped = [(ym, monthly_matches[ym]) for ym in sorted_months]
+def add_prefixed(d: Dict[str, float], prefix: str) -> Dict[str, float]:
+    return {f"{prefix}{k}": v for k, v in d.items()}
 
-    results = {}
 
-    for i, (ym, rows) in enumerate(grouped):
-        year, month = ym
-        key = f"{year:04d}-{month:02d}"
+def add_pairwise_deltas(
+    out: Dict[str, float],
+    sport: str,
+    p1_feats: Dict[str, float],
+    p2_feats: Dict[str, float],
+) -> None:
+    for k in p1_feats.keys():
+        out[f"{sport}_{k}_diff_p1_p2"] = float(p1_feats[k]) - float(p2_feats[k])
 
-        if month == 12:
-            ref_date = pd.Timestamp(year + 1, 1, 1).to_pydatetime()
-        else:
-            ref_date = pd.Timestamp(year, month + 1, 1).to_pydatetime()
 
-        for j in range(1, 10):
-            update_all_ratings(
-                rows,
-                ratings_by_month,
-                history,
-                ref_date=ref_date,
-                base_eta=float(1 / j),
-            )
+# =================================================
+# Rolling recent-form state
+# =================================================
+@dataclass
+class RollingWindow:
+    maxlen: int
+    values: deque = field(default_factory=deque)
+    sum_: float = 0.0
+    sumsq_: float = 0.0
 
-        best_alphas = best_alpha(rows, ratings_by_month)
+    def push(self, x: float) -> None:
+        x = float(x)
+        if len(self.values) == self.maxlen:
+            old = self.values.popleft()
+            self.sum_ -= old
+            self.sumsq_ -= old * old
+        self.values.append(x)
+        self.sum_ += x
+        self.sumsq_ += x * x
 
-        results[key] = {
-            "ratings": copy.deepcopy(dict(ratings_by_month)),
-            "alphas": best_alphas,
+    def count(self) -> int:
+        return len(self.values)
+
+    def mean(self, default: float = 0.0) -> float:
+        n = len(self.values)
+        return float(self.sum_ / n) if n > 0 else float(default)
+
+    def std(self, default: float = 0.0) -> float:
+        n = len(self.values)
+        if n <= 1:
+            return float(default)
+        mean = self.sum_ / n
+        var = max(0.0, self.sumsq_ / n - mean * mean)
+        return float(math.sqrt(var))
+
+
+@dataclass
+class PlayerSportRecentState:
+    n_matches: int = 0
+    last_dt: Optional[pd.Timestamp] = None
+
+    diff5: RollingWindow = field(default_factory=lambda: RollingWindow(5))
+    diff10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+    diff20: RollingWindow = field(default_factory=lambda: RollingWindow(20))
+
+    total5: RollingWindow = field(default_factory=lambda: RollingWindow(5))
+    total10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+
+    win5: RollingWindow = field(default_factory=lambda: RollingWindow(5))
+    win10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+    win20: RollingWindow = field(default_factory=lambda: RollingWindow(20))
+
+    blowout_win10: RollingWindow = field(
+        default_factory=lambda: RollingWindow(10)
+    )
+    blowout_loss10: RollingWindow = field(
+        default_factory=lambda: RollingWindow(10)
+    )
+    close10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+
+    resid10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+    resid20: RollingWindow = field(default_factory=lambda: RollingWindow(20))
+    resid_pos10: RollingWindow = field(
+        default_factory=lambda: RollingWindow(10)
+    )
+
+    fav_win10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+    fav_diff10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+    dog_win10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+    dog_diff10: RollingWindow = field(default_factory=lambda: RollingWindow(10))
+
+    ewm_diff: float = 0.0
+    ewm_initialized: bool = False
+
+
+def recent_state_features(
+    st: PlayerSportRecentState,
+    dt: Optional[pd.Timestamp],
+) -> Dict[str, float]:
+    if st.last_dt is None or dt is None or pd.isna(dt):
+        days_since_last_match = -1.0
+    else:
+        days_since_last_match = float((dt - st.last_dt).days)
+
+    return {
+        "matches_played": float(st.n_matches),
+        "days_since_last_match": days_since_last_match,
+        "recent_n_5": float(st.diff5.count()),
+        "recent_n_10": float(st.diff10.count()),
+        "recent_n_20": float(st.diff20.count()),
+        "diff_mean_5": st.diff5.mean(),
+        "diff_mean_10": st.diff10.mean(),
+        "diff_mean_20": st.diff20.mean(),
+        "diff_std_10": st.diff10.std(),
+        "diff_std_20": st.diff20.std(),
+        "total_mean_5": st.total5.mean(),
+        "total_mean_10": st.total10.mean(),
+        "total_std_10": st.total10.std(),
+        "winrate_5": st.win5.mean(),
+        "winrate_10": st.win10.mean(),
+        "winrate_20": st.win20.mean(),
+        "blowout_win_rate_10": st.blowout_win10.mean(),
+        "blowout_loss_rate_10": st.blowout_loss10.mean(),
+        "close_match_rate_10": st.close10.mean(),
+        "resid_mean_10": st.resid10.mean(),
+        "resid_mean_20": st.resid20.mean(),
+        "resid_std_10": st.resid10.std(),
+        "resid_pos_rate_10": st.resid_pos10.mean(),
+        "ewm_diff": float(st.ewm_diff if st.ewm_initialized else 0.0),
+        "momentum_diff_5_20": st.diff5.mean() - st.diff20.mean(),
+        "momentum_win_5_20": st.win5.mean() - st.win20.mean(),
+        "fav_count_10": float(st.fav_diff10.count()),
+        "fav_winrate_10": st.fav_win10.mean(),
+        "fav_diff_mean_10": st.fav_diff10.mean(),
+        "dog_count_10": float(st.dog_diff10.count()),
+        "dog_winrate_10": st.dog_win10.mean(),
+        "dog_diff_mean_10": st.dog_diff10.mean(),
+    }
+
+
+def update_recent_state(
+    st: PlayerSportRecentState,
+    actual_diff_player_pov: float,
+    actual_total: float,
+    expected_diff_player_pov: float,
+    dt: pd.Timestamp,
+    ewm_alpha: float = EWM_ALPHA,
+) -> None:
+    actual_diff_player_pov = float(actual_diff_player_pov)
+    actual_total = float(actual_total)
+    expected_diff_player_pov = float(expected_diff_player_pov)
+
+    residual = actual_diff_player_pov - expected_diff_player_pov
+    win = 1.0 if actual_diff_player_pov > 0 else 0.0
+    blowout_win = (
+        1.0 if actual_diff_player_pov >= BLOWOUT_WIN_THRESHOLD else 0.0
+    )
+    blowout_loss = (
+        1.0 if actual_diff_player_pov <= BLOWOUT_LOSS_THRESHOLD else 0.0
+    )
+    close_match = (
+        1.0 if abs(actual_diff_player_pov) <= CLOSE_MATCH_ABS_THRESHOLD else 0.0
+    )
+    resid_pos = 1.0 if residual > 0 else 0.0
+
+    st.diff5.push(actual_diff_player_pov)
+    st.diff10.push(actual_diff_player_pov)
+    st.diff20.push(actual_diff_player_pov)
+
+    st.total5.push(actual_total)
+    st.total10.push(actual_total)
+
+    st.win5.push(win)
+    st.win10.push(win)
+    st.win20.push(win)
+
+    st.blowout_win10.push(blowout_win)
+    st.blowout_loss10.push(blowout_loss)
+    st.close10.push(close_match)
+
+    st.resid10.push(residual)
+    st.resid20.push(residual)
+    st.resid_pos10.push(resid_pos)
+
+    if expected_diff_player_pov >= FAVORITE_EXPECTED_DIFF_THRESHOLD:
+        st.fav_win10.push(win)
+        st.fav_diff10.push(actual_diff_player_pov)
+    elif expected_diff_player_pov <= -FAVORITE_EXPECTED_DIFF_THRESHOLD:
+        st.dog_win10.push(win)
+        st.dog_diff10.push(actual_diff_player_pov)
+
+    if not st.ewm_initialized:
+        st.ewm_diff = actual_diff_player_pov
+        st.ewm_initialized = True
+    else:
+        st.ewm_diff = (
+            ewm_alpha * actual_diff_player_pov + (1.0 - ewm_alpha) * st.ewm_diff
+        )
+
+    st.n_matches += 1
+    st.last_dt = dt
+
+
+# =================================================
+# Long-term shrunk state
+# =================================================
+@dataclass
+class PlayerSportLongTermState:
+    n_matches: int = 0
+    diff_sum: float = 0.0
+    total_sum: float = 0.0
+    wins_sum: float = 0.0
+
+    def features(self, shrink: float = LONG_TERM_SHRINK) -> Dict[str, float]:
+        denom = self.n_matches + shrink
+        return {
+            "long_n": float(self.n_matches),
+            "long_diff_mean": float(self.diff_sum / denom),
+            "long_total_mean": float(self.total_sum / denom),
+            "long_winrate": float(self.wins_sum / denom),
         }
 
-    return results
-
-
-def get_last_month_snapshot(
-    ratings_by_month: Dict[str, dict],
-    dt: pd.Timestamp,
-    include_current_month: bool = True,
-    lower_year_bound: int = 2010,
-) -> Tuple[Optional[str], Optional[dict]]:
-    if pd.isna(dt):
-        return None, None
-
-    year = int(dt.year)
-    month = int(dt.month)
-
-    if not include_current_month:
-        year, month = previous_month(year, month)
-
-    while year >= lower_year_bound:
-        key = f"{year:04d}-{month:02d}"
-        if key in ratings_by_month:
-            snap = ratings_by_month[key]
-            if isinstance(snap, dict):
-                return key, snap
-        year, month = previous_month(year, month)
-
-    return None, None
-
-
-def get_snapshot_player_ratings(
-    snapshot: Optional[dict], player_name_norm: str
-) -> dict:
-    if snapshot is None:
-        return {}
-    ratings_block = snapshot.get("ratings", {})
-    rec = ratings_block.get(player_name_norm)
-    if not isinstance(rec, dict):
-        return {}
-    return rec
-
-
-def get_snapshot_rating_diff_fields(
-    p1_name_norm: str,
-    p2_name_norm: str,
-    snapshot: Optional[dict],
-) -> Dict[str, float]:
-    p1 = get_snapshot_player_ratings(snapshot, p1_name_norm)
-    p2 = get_snapshot_player_ratings(snapshot, p2_name_norm)
-
-    alphas = snapshot.get("alphas", {}) if isinstance(snapshot, dict) else {}
-
-    out: Dict[str, float] = {}
-    p1_found = 1 if isinstance(p1, dict) and len(p1) > 0 else 0
-    p2_found = 1 if isinstance(p2, dict) and len(p2) > 0 else 0
-
-    for sport_upper in SPORTS:
-        sport_lower = SPORT_UPPER_TO_LOWER[sport_upper]
-        alpha = float(alphas.get(sport_lower, ALPHAS[sport_upper]))
-
-        r1 = float(p1.get(sport_lower, 0.0))
-        r2 = float(p2.get(sport_lower, 0.0))
-        diff = r1 - r2
-
-        out[f"{sport_upper}_snapshot_rating_p1"] = r1
-        out[f"{sport_upper}_snapshot_rating_p2"] = r2
-        out[f"{sport_upper}_snapshot_rating_diff"] = diff
-        out[f"{sport_upper}_snapshot_pred_diff"] = rating_to_score_diff(
-            diff, alpha
-        )
-        out[f"{sport_upper}_snapshot_p1_found"] = p1_found
-        out[f"{sport_upper}_snapshot_p2_found"] = p2_found
-
-    total_pred = sum(out[f"{s}_snapshot_pred_diff"] for s in SPORTS)
-    out["snapshot_total_pred_diff"] = total_pred
-    out["snapshot_winner_p1"] = 1 if total_pred > 0 else 0
-    return out
+    def update(
+        self, actual_diff_player_pov: float, actual_total: float
+    ) -> None:
+        self.n_matches += 1
+        self.diff_sum += float(actual_diff_player_pov)
+        self.total_sum += float(actual_total)
+        self.wins_sum += 1.0 if actual_diff_player_pov > 0 else 0.0
 
 
 # =================================================
@@ -487,7 +421,10 @@ def h2h_update(
 
 
 def h2h_features(
-    st: H2HStats, a_is_p1: bool, dt: pd.Timestamp, prefix: str
+    st: H2HStats,
+    a_is_p1: bool,
+    dt: Optional[pd.Timestamp],
+    prefix: str,
 ) -> Dict[str, float]:
     out = {}
     out[f"{prefix}h2h_games"] = st.games
@@ -502,7 +439,7 @@ def h2h_features(
     out[f"{prefix}h2h_winrate_p1"] = winrate_a if a_is_p1 else (1.0 - winrate_a)
     out[f"{prefix}h2h_avg_diff_p1"] = avgdiff_a if a_is_p1 else (-avgdiff_a)
 
-    if st.last_dt is None or pd.isna(dt):
+    if st.last_dt is None or dt is None or pd.isna(dt):
         out[f"{prefix}h2h_days_since_last"] = np.nan
     else:
         out[f"{prefix}h2h_days_since_last"] = float((dt - st.last_dt).days)
@@ -511,12 +448,13 @@ def h2h_features(
 
 
 # =================================================
-# Margin-Elo state
+# One-rating-per-sport state
 # =================================================
-class MarginElo:
+class DecayedUpdateMarginElo:
     def __init__(self):
         self.R = defaultdict(lambda: {s: BASE for s in SPORTS})
         self.games = defaultdict(lambda: {s: 0 for s in SPORTS})
+        self.last_dt = defaultdict(lambda: {s: None for s in SPORTS})
 
     def predict(self, p1: str, p2: str) -> Dict[str, float]:
         pred = {}
@@ -525,8 +463,16 @@ class MarginElo:
             pred[s] = rating_to_score_diff(x, ALPHAS[s])
         return pred
 
+    def time_mult(self, player: str, sport: str, dt: pd.Timestamp) -> float:
+        gap = days_since(self.last_dt[player][sport], dt)
+        return time_multiplier(sport, gap)
+
     def update(
-        self, p1: str, p2: str, diffs: Dict[str, Optional[float]]
+        self,
+        p1: str,
+        p2: str,
+        diffs: Dict[str, Optional[float]],
+        dt: pd.Timestamp,
     ) -> None:
         for s in SPORTS:
             d = diffs.get(s)
@@ -545,8 +491,14 @@ class MarginElo:
             g2 = self.games[p2][s]
             eta = 0.5 * (eta_eff(g1) + eta_eff(g2))
 
+            tm1 = self.time_mult(p1, s, dt)
+            tm2 = self.time_mult(p2, s, dt)
+            time_mult_avg = 0.5 * (tm1 + tm2)
+
             grad = d_pred_dx(x, ALPHAS[s])
-            step = eta * err * grad
+            margin_mult = 1.0 + MARGIN_MULT_BY_SPORT[s] * (abs(d) / MAX_DIFF)
+
+            step = eta * time_mult_avg * margin_mult * err * grad
             step -= eta * L2 * x
 
             self.R[p1][s] = r1 + step
@@ -554,6 +506,107 @@ class MarginElo:
 
             self.games[p1][s] += 1
             self.games[p2][s] += 1
+            self.last_dt[p1][s] = dt
+            self.last_dt[p2][s] = dt
+
+
+# =================================================
+# Final inference-state export
+# =================================================
+def build_final_player_state_record(
+    player_name_norm: str,
+    last_dt: Optional[pd.Timestamp],
+    elo: DecayedUpdateMarginElo,
+    recent_state: Dict[str, Dict[str, PlayerSportRecentState]],
+    long_term_state: Dict[str, Dict[str, PlayerSportLongTermState]],
+) -> dict:
+    rec = {
+        "player_name": player_name_norm,
+        "player_key": player_name_norm,
+        "last_datetime": last_dt,
+    }
+
+    total_pred = 0.0
+
+    for s in SPORTS:
+        rating = float(elo.R[player_name_norm][s])
+        games = float(elo.games[player_name_norm][s])
+
+        rec[f"{s}_rating_p1"] = rating
+        rec[f"{s}_rating_p2"] = 0.0
+        rec[f"{s}_rating_diff"] = rating
+        rec[f"{s}_pred_diff"] = rating_to_score_diff(rating, ALPHAS[s])
+        rec[f"{s}_games_p1"] = games
+        rec[f"{s}_games_p2"] = 0.0
+        rec[f"{s}_games_diff"] = games
+        total_pred += rec[f"{s}_pred_diff"]
+
+        rec[f"{s}_days_since_last_p1"] = 0.0
+        rec[f"{s}_time_mult_p1"] = 1.0
+
+        recent_feats = recent_state_features(
+            recent_state[player_name_norm][s], last_dt
+        )
+        for k, v in recent_feats.items():
+            rec[f"{s}_p1_recent_{k}"] = v
+
+        long_feats = long_term_state[player_name_norm][s].features(
+            shrink=LONG_TERM_SHRINK
+        )
+        for k, v in long_feats.items():
+            rec[f"{s}_p1_{k}"] = v
+
+    rec["rating_total_pred_diff"] = total_pred
+    return rec
+
+
+def build_inference_state(
+    latest_player_dt_by_name: Dict[str, pd.Timestamp],
+    elo: DecayedUpdateMarginElo,
+    recent_state: Dict[str, Dict[str, PlayerSportRecentState]],
+    long_term_state: Dict[str, Dict[str, PlayerSportLongTermState]],
+    h2h_overall: Dict[Tuple[str, str], H2HStats],
+    h2h_sport: Dict[str, Dict[Tuple[str, str], H2HStats]],
+) -> dict:
+    player_states_by_name = {}
+
+    for player_name_norm in latest_player_dt_by_name.keys():
+        last_dt = latest_player_dt_by_name.get(player_name_norm)
+        player_states_by_name[player_name_norm] = (
+            build_final_player_state_record(
+                player_name_norm=player_name_norm,
+                last_dt=last_dt,
+                elo=elo,
+                recent_state=recent_state,
+                long_term_state=long_term_state,
+            )
+        )
+
+    pair_h2h = {}
+    for pk, st in h2h_overall.items():
+        a_name = pk[0]
+        b_name = pk[1]
+
+        pair_h2h[pk] = {
+            "overall": h2h_features(st, a_is_p1=True, dt=None, prefix=""),
+            "sports": {
+                s: h2h_features(
+                    h2h_sport[s][pk],
+                    a_is_p1=True,
+                    dt=None,
+                    prefix=f"{s}_",
+                )
+                for s in SPORTS
+            },
+            "a_name": a_name,
+            "b_name": b_name,
+            "last_dt": st.last_dt,
+        }
+
+    return {
+        "player_states_by_name": player_states_by_name,
+        "pair_h2h": pair_h2h,
+    }
 
 
 # =================================================
@@ -562,22 +615,28 @@ class MarginElo:
 def build_training_data(
     in_csv: str = "data/matches_cleaned.csv",
     out_csv: str = "data/data.csv",
-    include_current_month_snapshot: bool = True,
+    out_inference_state: str = "data/inference_state.pkl",
 ) -> None:
     df = pd.read_csv(in_csv, low_memory=False)
     df["datetime"] = safe_datetime(df)
     df = df.sort_values("datetime").reset_index(drop=True)
 
-    print("Building monthly snapshot ratings in memory...")
-    ratings_by_month = build_ratings_by_month_from_matches(df)
-
-    elo = MarginElo()
+    elo = DecayedUpdateMarginElo()
 
     h2h_overall: Dict[Tuple[str, str], H2HStats] = defaultdict(H2HStats)
     h2h_sport: Dict[str, Dict[Tuple[str, str], H2HStats]] = {
         s: defaultdict(H2HStats) for s in SPORTS
     }
 
+    recent_state: Dict[str, Dict[str, PlayerSportRecentState]] = defaultdict(
+        lambda: {s: PlayerSportRecentState() for s in SPORTS}
+    )
+
+    long_term_state: Dict[str, Dict[str, PlayerSportLongTermState]] = (
+        defaultdict(lambda: {s: PlayerSportLongTermState() for s in SPORTS})
+    )
+
+    latest_player_dt_by_name: Dict[str, pd.Timestamp] = {}
     out_rows: List[dict] = []
 
     for i, row in df.iterrows():
@@ -587,6 +646,9 @@ def build_training_data(
 
         p1_name = player_name(row, 1)
         p2_name = player_name(row, 2)
+
+        latest_player_dt_by_name[p1_name] = dt
+        latest_player_dt_by_name[p2_name] = dt
 
         out = {
             "match_index": i,
@@ -598,32 +660,31 @@ def build_training_data(
             "p2_name": p2_name,
         }
 
-        # Current running margin-Elo features
         pred = elo.predict(p1_key, p2_key)
         for s in SPORTS:
-            # NEW: explicit individual current ratings
             out[f"{s}_rating_p1"] = elo.R[p1_key][s]
             out[f"{s}_rating_p2"] = elo.R[p2_key][s]
-
             out[f"{s}_rating_diff"] = elo.R[p1_key][s] - elo.R[p2_key][s]
             out[f"{s}_pred_diff"] = pred[s]
             out[f"{s}_games_p1"] = elo.games[p1_key][s]
             out[f"{s}_games_p2"] = elo.games[p2_key][s]
             out[f"{s}_games_diff"] = elo.games[p1_key][s] - elo.games[p2_key][s]
 
-        # Monthly snapshot features
-        snapshot_key, snapshot = get_last_month_snapshot(
-            ratings_by_month,
-            dt,
-            include_current_month=include_current_month_snapshot,
-        )
-        out["snapshot_key"] = snapshot_key
-        out["snapshot_found"] = 1 if snapshot is not None else 0
-        out.update(
-            get_snapshot_rating_diff_fields(p1_name, p2_name, snapshot or {})
-        )
+            out[f"{s}_days_since_last_p1"] = days_since(
+                elo.last_dt[p1_key][s], dt
+            )
+            out[f"{s}_days_since_last_p2"] = days_since(
+                elo.last_dt[p2_key][s], dt
+            )
+            out[f"{s}_time_mult_p1"] = elo.time_mult(p1_key, s, dt)
+            out[f"{s}_time_mult_p2"] = elo.time_mult(p2_key, s, dt)
+            out[f"{s}_time_mult_diff"] = (
+                out[f"{s}_time_mult_p1"] - out[f"{s}_time_mult_p2"]
+            )
 
-        # H2H features
+        out["rating_total_pred_diff"] = sum(pred[s] for s in SPORTS)
+        out["rating_winner_p1"] = 1 if out["rating_total_pred_diff"] > 0 else 0
+
         pk = pair_key(p1_key, p2_key)
         a = pk[0]
         a_is_p1 = a == p1_key
@@ -634,7 +695,28 @@ def build_training_data(
                 h2h_features(h2h_sport[s][pk], a_is_p1, dt, prefix=f"{s}_")
             )
 
-        # Targets
+        for s in SPORTS:
+            p1_recent = recent_state[p1_key][s]
+            p2_recent = recent_state[p2_key][s]
+
+            p1_feats = recent_state_features(p1_recent, dt)
+            p2_feats = recent_state_features(p2_recent, dt)
+
+            out.update(add_prefixed(p1_feats, f"{s}_p1_recent_"))
+            out.update(add_prefixed(p2_feats, f"{s}_p2_recent_"))
+            add_pairwise_deltas(out, s, p1_feats, p2_feats)
+
+        for s in SPORTS:
+            p1_long = long_term_state[p1_key][s]
+            p2_long = long_term_state[p2_key][s]
+
+            p1_long_feats = p1_long.features(shrink=LONG_TERM_SHRINK)
+            p2_long_feats = p2_long.features(shrink=LONG_TERM_SHRINK)
+
+            out.update(add_prefixed(p1_long_feats, f"{s}_p1_"))
+            out.update(add_prefixed(p2_long_feats, f"{s}_p2_"))
+            add_pairwise_deltas(out, s, p1_long_feats, p2_long_feats)
+
         diffs = {s: get_sport_diff(row, s) for s in SPORTS}
         totals = {s: get_sport_total(row, s) for s in SPORTS}
 
@@ -664,18 +746,46 @@ def build_training_data(
 
         out_rows.append(out)
 
-        # Update state after features
-        elo.update(p1_key, p2_key, diffs)
+        # Update state AFTER row
+        elo.update(p1_key, p2_key, diffs, dt)
 
         total_diff_for_h2h = 0.0
         any_for_h2h = False
         for s in SPORTS:
             d = diffs[s]
-            if d is None:
+            t = totals[s]
+            if d is None or t is None:
                 continue
+
+            d = clip_diff(d)
             any_for_h2h = True
             total_diff_for_h2h += d
+
             h2h_update(h2h_sport[s][pk], a_is_p1, d, dt)
+
+            update_recent_state(
+                recent_state[p1_key][s],
+                actual_diff_player_pov=d,
+                actual_total=t,
+                expected_diff_player_pov=pred[s],
+                dt=dt,
+            )
+            update_recent_state(
+                recent_state[p2_key][s],
+                actual_diff_player_pov=-d,
+                actual_total=t,
+                expected_diff_player_pov=-pred[s],
+                dt=dt,
+            )
+
+            long_term_state[p1_key][s].update(
+                actual_diff_player_pov=d,
+                actual_total=t,
+            )
+            long_term_state[p2_key][s].update(
+                actual_diff_player_pov=-d,
+                actual_total=t,
+            )
 
         if any_for_h2h:
             h2h_update(h2h_overall[pk], a_is_p1, total_diff_for_h2h, dt)
@@ -686,8 +796,6 @@ def build_training_data(
         "match_index",
         "datetime",
         "month_key",
-        "snapshot_key",
-        "snapshot_found",
         "p1_key",
         "p2_key",
         "p1_name",
@@ -714,9 +822,22 @@ def build_training_data(
     out_df = out_df[id_cols + sorted(feature_cols) + sorted(target_cols)]
     out_df.to_csv(out_csv, index=False)
 
+    inference_state = build_inference_state(
+        latest_player_dt_by_name=latest_player_dt_by_name,
+        elo=elo,
+        recent_state=recent_state,
+        long_term_state=long_term_state,
+        h2h_overall=h2h_overall,
+        h2h_sport=h2h_sport,
+    )
+
+    with open(out_inference_state, "wb") as f:
+        pickle.dump(inference_state, f)
+
     print(
-        f"Saved {out_csv} with shape {out_df.shape} "
-        f"(USE_IDS={USE_IDS}, include_current_month_snapshot={include_current_month_snapshot})"
+        f"Saved {out_csv} with shape {out_df.shape} | "
+        f"Saved inference state to {out_inference_state} | "
+        f"USE_IDS={USE_IDS}"
     )
 
 
