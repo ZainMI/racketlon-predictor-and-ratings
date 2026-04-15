@@ -1,0 +1,43 @@
+{
+  "data_path": "data/data.csv",
+  "feature_cols": [
+    "TT_rating_diff",
+    "BD_rating_diff",
+    "SQ_rating_diff",
+    "TN_rating_diff"
+  ],
+  "target_col": "y_total_diff",
+  "train_ratio": 0.8,
+  "k": 9,
+  "radius": 3.678125087438333,
+  "n_rows_used": 30459,
+  "train_n": 24367,
+  "test_n": 6092,
+  "prediction_metrics": {
+    "total_diff_mae": 15.405254677314772,
+    "winner_accuracy": 0.6849967170059094
+  },
+  "runtime_ms": {
+    "tree_build_ms": 3.4719170071184635,
+    "total_query_ms": 342.03604198410176,
+    "avg_query_ms": 0.056145115230482885
+  },
+  "confidence_metrics": {
+    "knn_distance_confidence": {
+      "spearman_conf_vs_abs_error": 0.20544289508566974,
+      "low_q_mae": 12.314834084249684,
+      "high_q_mae": 18.75837676070579,
+      "gap_high_minus_low": 6.443542676456106
+    },
+    "radius_density_confidence": {
+      "spearman_conf_vs_abs_error": 0.20411322232800352,
+      "low_q_mae": 12.372223494238645,
+      "high_q_mae": 18.98793723345307,
+      "gap_high_minus_low": 6.615713739214426
+    },
+    "raw_geometry": {
+      "spearman_mean_neighbor_distance_vs_abs_error": -0.20544289508566974,
+      "spearman_radius_neighbor_count_vs_abs_error": 0.20411322232800352
+    }
+  }
+}

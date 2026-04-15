@@ -1,0 +1,58 @@
+{
+  "data_path": "data/data.csv",
+  "inference_state_path": "data/inference_state.pkl",
+  "catboost_package_dir": "models/catboost/artifacts/predictor_package",
+  "feature_cols": [
+    "TT_rating_diff",
+    "BD_rating_diff",
+    "SQ_rating_diff",
+    "TN_rating_diff",
+    "TT_diff_mean_10_diff_p1_p2",
+    "BD_diff_mean_10_diff_p1_p2",
+    "SQ_diff_mean_10_diff_p1_p2",
+    "TN_diff_mean_10_diff_p1_p2",
+    "TT_resid_mean_10_diff_p1_p2",
+    "BD_resid_mean_10_diff_p1_p2",
+    "SQ_resid_mean_10_diff_p1_p2",
+    "TN_resid_mean_10_diff_p1_p2"
+  ],
+  "target_col": "y_total_diff",
+  "train_ratio": 0.8,
+  "k": 5,
+  "n_rows_used": 30445,
+  "train_n": 24356,
+  "test_n": 6089,
+  "prediction_metrics": {
+    "catboost_total_diff_mae": 8.274593529315158,
+    "catboost_winner_accuracy": 0.8921005091147972
+  },
+  "runtime_ms": {
+    "tree_build_ms": 4.979999997885898,
+    "total_query_ms": 29830.42949999799,
+    "avg_query_ms": 4.899068730497288
+  },
+  "confidence_metrics": {
+    "consistency_only": {
+      "spearman_conf_vs_abs_error": 0.0017887266782029981,
+      "low_q_mae": 8.056504599211564,
+      "high_q_mae": 8.2365308804205,
+      "high_minus_low": 0.18002628120893505
+    },
+    "density_only": {
+      "spearman_conf_vs_abs_error": -0.013232852608161247,
+      "low_q_mae": 8.179369250985545,
+      "high_q_mae": 8.148488830486203,
+      "high_minus_low": -0.03088042049934181
+    },
+    "combined": {
+      "spearman_conf_vs_abs_error": -0.019105621156866086,
+      "low_q_mae": 8.530880420499344,
+      "high_q_mae": 8.091984231274639,
+      "high_minus_low": -0.43889618922470497
+    },
+    "raw_local_signals": {
+      "spearman_neighbor_target_std_vs_abs_error": -0.001788346616263615,
+      "spearman_mean_neighbor_distance_vs_abs_error": 0.013232852608161247
+    }
+  }
+}

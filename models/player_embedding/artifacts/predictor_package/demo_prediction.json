@@ -1,0 +1,34 @@
+{
+  "player1": "zain magdon-ismail",
+  "player2": "patrick moran",
+  "sports": {
+    "TT": {
+      "score_p1": 8,
+      "score_p2": 21,
+      "pred_diff": -12.885229110717773,
+      "pred_total": 29.5617618560791
+    },
+    "BD": {
+      "score_p1": 21,
+      "score_p2": 12,
+      "pred_diff": 9.083650588989258,
+      "pred_total": 33.37662887573242
+    },
+    "SQ": {
+      "score_p1": 21,
+      "score_p2": 17,
+      "pred_diff": 3.557145595550537,
+      "pred_total": 36.605873107910156
+    },
+    "TN": {
+      "score_p1": 21,
+      "score_p2": 14,
+      "pred_diff": 3.515097141265869,
+      "pred_total": 26.439212799072266
+    }
+  },
+  "total_p1": 71,
+  "total_p2": 64,
+  "total_diff": 7,
+  "winner": "zain magdon-ismail"
+}
