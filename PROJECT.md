@@ -340,7 +340,7 @@ If a player has been inactive, the next result is allowed to update the rating m
 
 The multiplier is:
 
-$\text{time\_mult} = 1 + c_s \left(1 - e^{-d/\tau_s}\right)$
+$\text{time_mult} = 1 + c_s \left(1 - e^{-d/\tau_s}\right)$
 
 where:
 
