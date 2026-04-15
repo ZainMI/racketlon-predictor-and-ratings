@@ -1,0 +1,32 @@
+{
+  "data_path": "data/matches_cleaned.csv",
+  "train_ratio": 0.8,
+  "shrink": 5.0,
+  "n_rows": 30459,
+  "sport_metrics": {
+    "TT": {
+      "diff_mae": 6.865719894266191,
+      "total_mae": 8.94049581339099,
+      "test_n": 6092
+    },
+    "BD": {
+      "diff_mae": 7.496557690689951,
+      "total_mae": 8.682530546185003,
+      "test_n": 6092
+    },
+    "SQ": {
+      "diff_mae": 8.150888471464171,
+      "total_mae": 8.528177949060547,
+      "test_n": 6092
+    },
+    "TN": {
+      "diff_mae": 5.505494379196035,
+      "total_mae": 9.723741313811603,
+      "test_n": 3877
+    }
+  },
+  "match_metrics": {
+    "total_diff_mae": 16.723736047275114,
+    "winner_accuracy": 0.6644780039395929
+  }
+}

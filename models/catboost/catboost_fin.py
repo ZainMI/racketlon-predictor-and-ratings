@@ -2,8 +2,8 @@ import json
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from catboost import CatBoostRegressor
@@ -18,7 +18,7 @@ BASE = 0.0
 
 DATA_PATH = "data/data.csv"
 INFERENCE_STATE_PATH = "data/inference_state.pkl"
-OUTPUT_DIR = "finished_models/catboost/artifacts/predictor_package"
+OUTPUT_DIR = "full/catboost/artifacts/predictor_package"
 TRAIN_RATIO = 0.8
 PREDICT_TENNIS_INDEPENDENTLY = True
 
@@ -250,9 +250,11 @@ def total_weights(y_total):
 
 
 # -------------------------------------------------
-# Plots
+# Optional plots
 # -------------------------------------------------
 def save_scatter_plot(x, y, xlabel, ylabel, title, outpath):
+    import matplotlib.pyplot as plt
+
     plt.figure(figsize=(6, 6))
     plt.scatter(x, y, alpha=0.35)
     mn = min(np.min(x), np.min(y))
@@ -267,6 +269,8 @@ def save_scatter_plot(x, y, xlabel, ylabel, title, outpath):
 
 
 def save_confusion_plot(y_true, y_pred, outpath):
+    import matplotlib.pyplot as plt
+
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(5, 4))
     plt.imshow(cm)
@@ -276,21 +280,6 @@ def save_confusion_plot(y_true, y_pred, outpath):
         for j in range(cm.shape[1]):
             plt.text(j, i, str(cm[i, j]), ha="center", va="center")
     plt.title("Winner confusion matrix")
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=160)
-    plt.close()
-
-
-def save_feature_importance_plot(model, feature_cols, title, outpath, top_n=20):
-    importances = model.get_feature_importance()
-    order = np.argsort(importances)[::-1][:top_n]
-    labels = [feature_cols[i] for i in order][::-1]
-    vals = importances[order][::-1]
-
-    plt.figure(figsize=(8, 6))
-    plt.barh(range(len(labels)), vals)
-    plt.yticks(range(len(labels)), labels)
-    plt.title(title)
     plt.tight_layout()
     plt.savefig(outpath, dpi=160)
     plt.close()
@@ -520,8 +509,9 @@ def build_synthetic_match_row(inference_state, player1, player2, feature_cols):
 @dataclass
 class PredictorPackage:
     models: dict
-    feature_cols: list
+    feature_cols: dict
     inference_state: dict
+    metadata: Optional[dict] = None
 
     @classmethod
     def load(cls, directory):
@@ -532,10 +522,18 @@ class PredictorPackage:
             feature_cols = json.load(f)
         with open(directory / "inference_state.pkl", "rb") as f:
             inference_state = pickle.load(f)
+
+        metadata = None
+        meta_path = directory / "metadata.json"
+        if meta_path.exists():
+            with open(meta_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+
         return cls(
             models=models,
             feature_cols=feature_cols,
             inference_state=inference_state,
+            metadata=metadata,
         )
 
     def predict_pair(self, player1, player2):
@@ -618,123 +616,191 @@ class PredictorPackage:
             "winner": winner,
         }
 
+    def get_player_state(self, player):
+        p = player.strip().lower()
+        state = self.inference_state["player_states_by_name"].get(p)
+        if state is None:
+            raise ValueError(f"No history found for player '{player}'")
+        return state
+
 
 # -------------------------------------------------
-# Train
+# Public convenience helpers
 # -------------------------------------------------
-def train_and_package():
-    outdir = ensure_dir(OUTPUT_DIR)
-    plots_dir = ensure_dir(outdir / "plots")
+def load_predictor(directory: str = OUTPUT_DIR) -> PredictorPackage:
+    return PredictorPackage.load(directory)
 
-    df = read_data(DATA_PATH)
-    inference_state = load_inference_state(INFERENCE_STATE_PATH)
-    split = int(len(df) * TRAIN_RATIO)
-    all_feature_cols = get_feature_columns(df)
 
-    sport_models = {}
+def predict_match(
+    predictor: PredictorPackage,
+    player1: str,
+    player2: str,
+) -> dict:
+    return predictor.predict_pair(player1, player2)
+
+
+def get_player_ratings(
+    predictor: PredictorPackage,
+    player: str,
+) -> dict:
+    state = predictor.get_player_state(player)
+    out = {"player": player, "sports": {}}
+
+    for sport in SPORTS:
+        out["sports"][sport] = {
+            "rating": float(state.get(f"{sport}_rating_p1", 0.0)),
+            "pred_diff_vs_avg": float(state.get(f"{sport}_pred_diff", 0.0)),
+            "games_played": int(state.get(f"{sport}_games_p1", 0.0)),
+            "days_since_last": float(
+                state.get(f"{sport}_days_since_last_p1", 0.0)
+            ),
+            "time_multiplier": float(state.get(f"{sport}_time_mult_p1", 1.0)),
+            "diff_mean_10": float(
+                state.get(f"{sport}_p1_recent_diff_mean_10", 0.0)
+            ),
+            "resid_mean_10": float(
+                state.get(f"{sport}_p1_recent_resid_mean_10", 0.0)
+            ),
+            "diff_std_10": float(
+                state.get(f"{sport}_p1_recent_diff_std_10", 0.0)
+            ),
+            "momentum_diff_5_20": float(
+                state.get(f"{sport}_p1_recent_momentum_diff_5_20", 0.0)
+            ),
+            "long_n": float(state.get(f"{sport}_p1_long_n", 0.0)),
+            "long_diff_mean": float(
+                state.get(f"{sport}_p1_long_diff_mean", 0.0)
+            ),
+            "long_total_mean": float(
+                state.get(f"{sport}_p1_long_total_mean", 0.0)
+            ),
+            "long_winrate": float(state.get(f"{sport}_p1_long_winrate", 0.0)),
+        }
+
+    return out
+
+
+# -------------------------------------------------
+# Internal train helpers
+# -------------------------------------------------
+def _train_single_sport_models(
+    df: pd.DataFrame,
+    sport: str,
+    fit_rows_mask: np.ndarray,
+):
+    base_feat_cols = get_base_feature_cols(df, sport)
+    resid_feat_cols = get_residual_feature_cols(df, sport)
+    total_feat_cols = get_total_feature_cols(df, sport)
+    all_feat_cols = sorted(
+        set(base_feat_cols + resid_feat_cols + total_feat_cols)
+    )
+
+    diff_col = f"{sport}_y_diff"
+    total_col = f"{sport}_y_total"
+
+    mask = df[diff_col].notna() & df[total_col].notna() & fit_rows_mask
+    rows = np.where(mask.values)[0]
+
+    if len(rows) == 0:
+        return None
+
+    X_base = df.loc[rows, base_feat_cols].copy().fillna(0.0)
+    X_resid = df.loc[rows, resid_feat_cols].copy().fillna(0.0)
+    X_total = df.loc[rows, total_feat_cols].copy().fillna(0.0)
+
+    y_diff = df.loc[rows, diff_col].astype(float).values
+    y_total = df.loc[rows, total_col].astype(float).values
+
+    model_diff_base = CatBoostRegressor(**BASE_DIFF_MODEL_PARAMS)
+    model_diff_base.fit(
+        X_base,
+        y_diff,
+        sample_weight=diff_weights(y_diff),
+    )
+
+    base_pred = model_diff_base.predict(X_base)
+    resid_train_target = y_diff - base_pred
+
+    X_resid_aug = X_resid.copy()
+    X_resid_aug["base_pred_diff"] = base_pred
+    X_resid_aug["abs_base_pred_diff"] = np.abs(base_pred)
+
+    model_diff_resid = CatBoostRegressor(**RESID_MODEL_PARAMS)
+    model_diff_resid.fit(
+        X_resid_aug,
+        resid_train_target,
+        sample_weight=residual_weights(y_diff, base_pred),
+    )
+
+    resid_pred = model_diff_resid.predict(X_resid_aug)
+    pred_diff_raw = base_pred + RESIDUAL_SCALE * resid_pred
+    diff_calibrator = fit_linear_calibrator(y_diff, pred_diff_raw)
+
+    model_total = CatBoostRegressor(**TOTAL_MODEL_PARAMS)
+    model_total.fit(
+        X_total,
+        y_total,
+        sample_weight=total_weights(y_total),
+    )
+
+    return {
+        "model_diff_base": model_diff_base,
+        "model_diff_resid": model_diff_resid,
+        "model_total": model_total,
+        "base_feat_cols": base_feat_cols,
+        "resid_feat_cols": resid_feat_cols,
+        "total_feat_cols": total_feat_cols,
+        "all_feat_cols": all_feat_cols,
+        "diff_calibrator": diff_calibrator,
+        "n_rows_fit": int(len(rows)),
+    }
+
+
+def _evaluate_models(
+    df: pd.DataFrame,
+    sport_models: dict,
+    eval_rows_mask: np.ndarray,
+):
     total_pred_p1 = np.zeros(len(df))
     total_pred_p2 = np.zeros(len(df))
     metrics = {}
 
-    print(f"Using {len(all_feature_cols)} total columns")
-    print(
-        "Training compact CatBoost with base + residual model, no blowout features."
-    )
-
     for sport in SPORTS:
-        base_feat_cols = get_base_feature_cols(df, sport)
-        resid_feat_cols = get_residual_feature_cols(df, sport)
-        total_feat_cols = get_total_feature_cols(df, sport)
-        all_feat_cols = sorted(
-            set(base_feat_cols + resid_feat_cols + total_feat_cols)
-        )
+        pack = sport_models[sport]
 
         diff_col = f"{sport}_y_diff"
         total_col = f"{sport}_y_total"
 
-        mask = df[diff_col].notna() & df[total_col].notna()
+        mask = df[diff_col].notna() & df[total_col].notna() & eval_rows_mask
         rows = np.where(mask.values)[0]
 
-        X_base = df.loc[rows, base_feat_cols].copy().fillna(0.0)
-        X_resid = df.loc[rows, resid_feat_cols].copy().fillna(0.0)
-        X_total = df.loc[rows, total_feat_cols].copy().fillna(0.0)
+        if len(rows) == 0:
+            continue
+
+        X_base = df.loc[rows, pack["base_feat_cols"]].copy().fillna(0.0)
+        X_resid = df.loc[rows, pack["resid_feat_cols"]].copy().fillna(0.0)
+        X_total = df.loc[rows, pack["total_feat_cols"]].copy().fillna(0.0)
 
         y_diff = df.loc[rows, diff_col].astype(float).values
         y_total = df.loc[rows, total_col].astype(float).values
 
-        train_mask = rows < split
-        test_mask = rows >= split
+        base_pred = pack["model_diff_base"].predict(X_base)
 
-        if train_mask.sum() == 0 or test_mask.sum() == 0:
-            continue
+        X_resid_aug = X_resid.copy()
+        X_resid_aug["base_pred_diff"] = base_pred
+        X_resid_aug["abs_base_pred_diff"] = np.abs(base_pred)
 
-        X_base_train = X_base.iloc[train_mask]
-        X_base_test = X_base.iloc[test_mask]
-
-        X_resid_train = X_resid.iloc[train_mask]
-        X_resid_test = X_resid.iloc[test_mask]
-
-        X_total_train = X_total.iloc[train_mask]
-        X_total_test = X_total.iloc[test_mask]
-
-        y_diff_train = y_diff[train_mask]
-        y_diff_test = y_diff[test_mask]
-        y_total_train = y_total[train_mask]
-        y_total_test = y_total[test_mask]
-
-        model_diff_base = CatBoostRegressor(**BASE_DIFF_MODEL_PARAMS)
-        model_diff_base.fit(
-            X_base_train,
-            y_diff_train,
-            sample_weight=diff_weights(y_diff_train),
-        )
-
-        base_pred_train = model_diff_base.predict(X_base_train)
-        base_pred_test = model_diff_base.predict(X_base_test)
-
-        resid_train_target = y_diff_train - base_pred_train
-
-        X_resid_train_aug = X_resid_train.copy()
-        X_resid_test_aug = X_resid_test.copy()
-        X_resid_train_aug["base_pred_diff"] = base_pred_train
-        X_resid_train_aug["abs_base_pred_diff"] = np.abs(base_pred_train)
-        X_resid_test_aug["base_pred_diff"] = base_pred_test
-        X_resid_test_aug["abs_base_pred_diff"] = np.abs(base_pred_test)
-
-        model_diff_resid = CatBoostRegressor(**RESID_MODEL_PARAMS)
-        model_diff_resid.fit(
-            X_resid_train_aug,
-            resid_train_target,
-            sample_weight=residual_weights(y_diff_train, base_pred_train),
-        )
-
-        resid_pred_train = model_diff_resid.predict(X_resid_train_aug)
-        resid_pred_test = model_diff_resid.predict(X_resid_test_aug)
-
-        pred_diff_train_raw = (
-            base_pred_train + RESIDUAL_SCALE * resid_pred_train
-        )
-        pred_diff_test_raw = base_pred_test + RESIDUAL_SCALE * resid_pred_test
-
-        diff_calibrator = fit_linear_calibrator(
-            y_diff_train, pred_diff_train_raw
-        )
+        resid_pred = pack["model_diff_resid"].predict(X_resid_aug)
+        pred_diff_raw = base_pred + RESIDUAL_SCALE * resid_pred
 
         pred_diff = np.clip(
-            apply_linear_calibrator(pred_diff_test_raw, diff_calibrator),
+            apply_linear_calibrator(pred_diff_raw, pack["diff_calibrator"]),
             -21,
             21,
         )
+        pred_total = np.clip(pack["model_total"].predict(X_total), 0, 42)
 
-        model_total = CatBoostRegressor(**TOTAL_MODEL_PARAMS)
-        model_total.fit(
-            X_total_train,
-            y_total_train,
-            sample_weight=total_weights(y_total_train),
-        )
-        pred_total = np.clip(model_total.predict(X_total_test), 0, 42)
-
-        for idx, row_idx in enumerate(rows[test_mask]):
+        for idx, row_idx in enumerate(rows):
             if sport in ["TT", "BD", "SQ"]:
                 s1_hat, s2_hat = decode_full_game_score(
                     pred_diff[idx], pred_total[idx]
@@ -755,141 +821,165 @@ def train_and_package():
             total_pred_p1[row_idx] += s1_hat
             total_pred_p2[row_idx] += s2_hat
 
-        diff_mae = float(mean_absolute_error(y_diff_test, pred_diff))
-        total_mae = float(mean_absolute_error(y_total_test, pred_total))
-        diff_std_ratio = float(
-            np.std(pred_diff) / max(np.std(y_diff_test), 1e-9)
-        )
-
-        print(f"\n{sport} TEST RESULTS")
-        print("Diff MAE:", diff_mae)
-        print("Total MAE:", total_mae)
-        print("Diff std ratio pred/actual:", diff_std_ratio)
+        diff_mae = float(mean_absolute_error(y_diff, pred_diff))
+        total_mae = float(mean_absolute_error(y_total, pred_total))
+        diff_std_ratio = float(np.std(pred_diff) / max(np.std(y_diff), 1e-9))
 
         metrics[sport] = {
             "diff_mae": diff_mae,
             "total_mae": total_mae,
             "diff_std_ratio_pred_over_actual": diff_std_ratio,
-            "n_base_features": len(base_feat_cols),
-            "n_resid_features": len(resid_feat_cols) + 2,
-            "n_total_features": len(total_feat_cols),
-            "train_n": int(train_mask.sum()),
-            "test_n": int(test_mask.sum()),
-        }
-
-        save_scatter_plot(
-            y_diff_test,
-            pred_diff,
-            "Actual diff",
-            "Predicted diff",
-            f"{sport} diff: actual vs predicted",
-            plots_dir / f"{sport.lower()}_diff_scatter.png",
-        )
-        save_scatter_plot(
-            y_total_test,
-            pred_total,
-            "Actual total",
-            "Predicted total",
-            f"{sport} total: actual vs predicted",
-            plots_dir / f"{sport.lower()}_total_scatter.png",
-        )
-        save_feature_importance_plot(
-            model_diff_base,
-            base_feat_cols,
-            f"{sport} base diff feature importance",
-            plots_dir / f"{sport.lower()}_base_diff_feature_importance.png",
-        )
-        save_feature_importance_plot(
-            model_diff_resid,
-            resid_feat_cols + ["base_pred_diff", "abs_base_pred_diff"],
-            f"{sport} residual diff feature importance",
-            plots_dir / f"{sport.lower()}_resid_diff_feature_importance.png",
-        )
-        save_feature_importance_plot(
-            model_total,
-            total_feat_cols,
-            f"{sport} total feature importance",
-            plots_dir / f"{sport.lower()}_total_feature_importance.png",
-        )
-
-        sport_models[sport] = {
-            "model_diff_base": model_diff_base,
-            "model_diff_resid": model_diff_resid,
-            "model_total": model_total,
-            "base_feat_cols": base_feat_cols,
-            "resid_feat_cols": resid_feat_cols,
-            "total_feat_cols": total_feat_cols,
-            "all_feat_cols": all_feat_cols,
-            "diff_calibrator": diff_calibrator,
+            "n_eval_rows": int(len(rows)),
         }
 
     true_diff = []
-    pred_diff = []
+    pred_diff_match = []
 
-    for i in range(split, len(df)):
+    for i in np.where(eval_rows_mask)[0]:
         if pd.isna(df.loc[i, "y_total_diff"]):
             continue
         true_diff.append(float(df.loc[i, "y_total_diff"]))
-        pred_diff.append(float(total_pred_p1[i] - total_pred_p2[i]))
+        pred_diff_match.append(float(total_pred_p1[i] - total_pred_p2[i]))
 
     true_diff = np.array(true_diff)
-    pred_diff = np.array(pred_diff)
+    pred_diff_match = np.array(pred_diff_match)
 
-    match_mae = float(mean_absolute_error(true_diff, pred_diff))
-    winner_acc = float(((pred_diff > 0) == (true_diff > 0)).mean())
+    match_metrics = None
+    if len(true_diff) > 0:
+        match_metrics = {
+            "total_diff_mae": float(
+                mean_absolute_error(true_diff, pred_diff_match)
+            ),
+            "winner_accuracy": float(
+                ((pred_diff_match > 0) == (true_diff > 0)).mean()
+            ),
+        }
 
-    print("\n=== MATCH LEVEL ===")
-    print("Total Diff MAE:", match_mae)
-    print("Winner Accuracy:", winner_acc)
-
-    save_scatter_plot(
-        true_diff,
-        pred_diff,
-        "Actual total diff",
-        "Predicted total diff",
-        "Match total diff: actual vs predicted",
-        plots_dir / "match_total_diff_scatter.png",
-    )
-    save_confusion_plot(
-        (true_diff > 0).astype(int),
-        (pred_diff > 0).astype(int),
-        plots_dir / "winner_confusion_matrix.png",
-    )
-
-    metadata = {
-        "data_path": DATA_PATH,
-        "inference_state_path": INFERENCE_STATE_PATH,
-        "train_ratio": TRAIN_RATIO,
-        "n_rows": int(len(df)),
+    return {
         "sport_metrics": metrics,
-        "match_metrics": {
-            "total_diff_mae": match_mae,
-            "winner_accuracy": winner_acc,
-        },
+        "match_metrics": match_metrics,
+        "total_pred_p1": total_pred_p1,
+        "total_pred_p2": total_pred_p2,
     }
 
-    with open(outdir / "models.pkl", "wb") as f:
+
+def _save_package(
+    sport_models: dict,
+    inference_state: dict,
+    outdir: str,
+    metadata: dict,
+):
+    outdir = ensure_dir(outdir)
+
+    with open(Path(outdir) / "models.pkl", "wb") as f:
         pickle.dump(sport_models, f)
-    with open(outdir / "feature_cols.json", "w", encoding="utf-8") as f:
+
+    with open(Path(outdir) / "feature_cols.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 sport: {
                     "base_feat_cols": sport_models[sport]["base_feat_cols"],
                     "resid_feat_cols": sport_models[sport]["resid_feat_cols"],
                     "total_feat_cols": sport_models[sport]["total_feat_cols"],
+                    "all_feat_cols": sport_models[sport]["all_feat_cols"],
                 }
                 for sport in sport_models
             },
             f,
             indent=2,
         )
-    with open(outdir / "metadata.json", "w", encoding="utf-8") as f:
+
+    with open(Path(outdir) / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
-    with open(outdir / "inference_state.pkl", "wb") as f:
+
+    with open(Path(outdir) / "inference_state.pkl", "wb") as f:
         pickle.dump(inference_state, f)
 
-    print(f"\nSaved CatBoost package to: {outdir}")
+
+# -------------------------------------------------
+# Public train functions
+# -------------------------------------------------
+def train_eval_and_package(
+    data_path: str = DATA_PATH,
+    inference_state_path: str = INFERENCE_STATE_PATH,
+    output_dir: str = OUTPUT_DIR,
+    train_ratio: float = TRAIN_RATIO,
+) -> PredictorPackage:
+    df = read_data(data_path)
+    inference_state = load_inference_state(inference_state_path)
+
+    split = int(len(df) * train_ratio)
+    train_rows_mask = np.arange(len(df)) < split
+    test_rows_mask = np.arange(len(df)) >= split
+
+    sport_models = {}
+    for sport in SPORTS:
+        pack = _train_single_sport_models(df, sport, train_rows_mask)
+        if pack is not None:
+            sport_models[sport] = pack
+
+    eval_out = _evaluate_models(df, sport_models, test_rows_mask)
+
+    metadata = {
+        "mode": "train_eval",
+        "data_path": data_path,
+        "inference_state_path": inference_state_path,
+        "train_ratio": train_ratio,
+        "n_rows": int(len(df)),
+        "sport_metrics": eval_out["sport_metrics"],
+        "match_metrics": eval_out["match_metrics"],
+    }
+
+    _save_package(
+        sport_models=sport_models,
+        inference_state=inference_state,
+        outdir=output_dir,
+        metadata=metadata,
+    )
+
+    return PredictorPackage.load(output_dir)
 
 
+def train_full_and_package(
+    data_path: str = DATA_PATH,
+    inference_state_path: str = INFERENCE_STATE_PATH,
+    output_dir: str = OUTPUT_DIR,
+) -> PredictorPackage:
+    df = read_data(data_path)
+    inference_state = load_inference_state(inference_state_path)
+
+    full_rows_mask = np.ones(len(df), dtype=bool)
+
+    sport_models = {}
+    fit_metrics = {}
+    for sport in SPORTS:
+        pack = _train_single_sport_models(df, sport, full_rows_mask)
+        if pack is not None:
+            sport_models[sport] = pack
+            fit_metrics[sport] = {"n_fit_rows": pack["n_rows_fit"]}
+
+    metadata = {
+        "mode": "train_full",
+        "data_path": data_path,
+        "inference_state_path": inference_state_path,
+        "n_rows": int(len(df)),
+        "sport_metrics": fit_metrics,
+        "match_metrics": None,
+    }
+
+    _save_package(
+        sport_models=sport_models,
+        inference_state=inference_state,
+        outdir=output_dir,
+        metadata=metadata,
+    )
+
+    return PredictorPackage.load(output_dir)
+
+
+# -------------------------------------------------
+# Example CLI usage
+# -------------------------------------------------
 if __name__ == "__main__":
-    train_and_package()
+    predictor = train_eval_and_package()
+    print("Saved evaluated package.")

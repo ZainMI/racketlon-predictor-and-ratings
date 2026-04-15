@@ -1,0 +1,40 @@
+{
+  "sport_metrics": {
+    "TT": {
+      "diff_mae": 5.963780258503858,
+      "total_mae": 4.6880466100501135,
+      "train_n": 21321,
+      "val_n": 3046,
+      "test_n": 6092,
+      "n_features": 20
+    },
+    "BD": {
+      "diff_mae": 6.332954844892761,
+      "total_mae": 4.754809215831193,
+      "train_n": 21321,
+      "val_n": 3046,
+      "test_n": 6092,
+      "n_features": 20
+    },
+    "SQ": {
+      "diff_mae": 6.968728963607088,
+      "total_mae": 5.112961689892053,
+      "train_n": 21321,
+      "val_n": 3046,
+      "test_n": 6092,
+      "n_features": 20
+    },
+    "TN": {
+      "diff_mae": 5.468751272189542,
+      "total_mae": 9.230788903658249,
+      "train_n": 14991,
+      "val_n": 1902,
+      "test_n": 3877,
+      "n_features": 20
+    }
+  },
+  "match_metrics": {
+    "total_diff_mae": 14.004760341431385,
+    "winner_accuracy": 0.7284963887065004
+  }
+}

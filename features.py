@@ -802,13 +802,61 @@ def build_training_data(
         "p2_name",
     ]
 
-    feature_cols = [
-        c
-        for c in out_df.columns
-        if c not in id_cols
-        and not c.endswith("_y_diff")
-        and not c.endswith("_y_total")
-        and not c.startswith("y_")
+    keep_feature_cols = []
+
+    for s in SPORTS:
+        keep_feature_cols += [
+            # core rating features
+            f"{s}_rating_p1",
+            f"{s}_rating_p2",
+            f"{s}_rating_diff",
+            f"{s}_games_p1",
+            f"{s}_games_p2",
+            f"{s}_games_diff",
+            f"{s}_days_since_last_p1",
+            f"{s}_days_since_last_p2",
+            f"{s}_time_mult_p1",
+            f"{s}_time_mult_p2",
+            f"{s}_time_mult_diff",
+            # overall H2H in this sport
+            f"{s}_h2h_games",
+            f"{s}_h2h_avg_diff_p1",
+            f"{s}_h2h_winrate_p1",
+            f"{s}_h2h_days_since_last",
+            # recent-form features actually used
+            f"{s}_p1_recent_diff_mean_10",
+            f"{s}_p2_recent_diff_mean_10",
+            f"{s}_diff_mean_10_diff_p1_p2",
+            f"{s}_p1_recent_resid_mean_10",
+            f"{s}_p2_recent_resid_mean_10",
+            f"{s}_resid_mean_10_diff_p1_p2",
+            f"{s}_p1_recent_diff_std_10",
+            f"{s}_p2_recent_diff_std_10",
+            f"{s}_diff_std_10_diff_p1_p2",
+            f"{s}_p1_recent_momentum_diff_5_20",
+            f"{s}_p2_recent_momentum_diff_5_20",
+            f"{s}_momentum_diff_5_20_diff_p1_p2",
+            # long-term shrunk features
+            f"{s}_p1_long_n",
+            f"{s}_p2_long_n",
+            f"{s}_long_n_diff_p1_p2",
+            f"{s}_p1_long_diff_mean",
+            f"{s}_p2_long_diff_mean",
+            f"{s}_long_diff_mean_diff_p1_p2",
+            f"{s}_p1_long_total_mean",
+            f"{s}_p2_long_total_mean",
+            f"{s}_long_total_mean_diff_p1_p2",
+            f"{s}_p1_long_winrate",
+            f"{s}_p2_long_winrate",
+            f"{s}_long_winrate_diff_p1_p2",
+        ]
+
+    keep_feature_cols += [
+        # overall match H2H
+        "h2h_games",
+        "h2h_avg_diff_p1",
+        "h2h_winrate_p1",
+        "h2h_days_since_last",
     ]
 
     target_cols = [
@@ -819,7 +867,12 @@ def build_training_data(
         or c in ("y_total_diff", "y_winner_p1")
     ]
 
-    out_df = out_df[id_cols + sorted(feature_cols) + sorted(target_cols)]
+    ordered_cols = []
+    for c in id_cols + keep_feature_cols + sorted(target_cols):
+        if c in out_df.columns and c not in ordered_cols:
+            ordered_cols.append(c)
+
+    out_df = out_df[ordered_cols]
     out_df.to_csv(out_csv, index=False)
 
     inference_state = build_inference_state(

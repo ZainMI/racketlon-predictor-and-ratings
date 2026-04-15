@@ -17,7 +17,7 @@ BASE = 0.0
 
 DATA_PATH = "data/data.csv"
 INFERENCE_STATE_PATH = "data/inference_state.pkl"
-OUTPUT_DIR = "finished_models/benchmark/artifacts/predictor_package"
+OUTPUT_DIR = "finished_models/linear/artifacts/predictor_package"
 TRAIN_RATIO = 0.8
 RIDGE_ALPHA = 3.0
 PREDICT_TENNIS_INDEPENDENTLY = True
