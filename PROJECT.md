@@ -400,7 +400,7 @@ This is a very mild stabilizer rather than a strong shrinkage force.
 
 The update is approximately:
 
-$\Delta x \propto \eta \cdot \text{time\_mult} \cdot \text{margin\_mult} \cdot (d - \hat{d}) \cdot \frac{d\hat{d}}{dx}$
+$\Delta x \propto \eta \cdot \mathrm{time\_mult} \cdot \mathrm{margin\_mult} \cdot (d - \hat{d}) \cdot \frac{d\hat{d}}{dx}$
 
 So the system behaves like a nonlinear error-correcting margin-sensitive Elo variant.
 
