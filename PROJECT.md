@@ -369,7 +369,7 @@ Parameters:
 
 The update also scales with observed match margin:
 
-$\text{margin\_mult} = 1 + m_s \cdot \frac{|d|}{21}$
+$\mathrm{margin\_mult} = 1 + m_s \cdot \frac{|d|}{21}$
 
 where $m_s$ is sport-specific:
 
