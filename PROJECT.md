@@ -1332,5 +1332,3 @@ The project is reproducible through the following stages:
 
 5. API/service functions  
    load saved package and predict future matchups from player names
-
-This structure makes the project suitable both as an academic final project and as a real deployed sports prediction tool.
