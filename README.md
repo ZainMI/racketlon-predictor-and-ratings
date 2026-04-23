@@ -1,558 +1,98 @@
-# 🏓 Racketlon Match Predictor — Implementation Overview
+# 🏓 Racketlon Match Predictor
 
-This project implements a full **end-to-end ML pipeline** for predicting racketlon match outcomes and scorelines across four sports:
+This project implements a full **end-to-end machine learning pipeline** for predicting racketlon match outcomes.
+
+Racketlon is a multi-sport competition where two players compete sequentially across four sports:
 
 - Table Tennis (TT)
 - Badminton (BD)
 - Squash (SQ)
 - Tennis (TN)
 
-The system is designed to:
-
-- operate on **chronological match data**
-- avoid **data leakage**
-- support **unseen player pairings**
-- provide **interpretable and structured predictions**
+The winner is determined by the total number of points accumulated across all four sports. This repository provides the tools to scrape historical data, track player ratings, train predictive models, and forecast future matchups.
 
 ---
 
-# 🏗️ System Architecture
+# ⚙️ How It Works: The End-to-End Pipeline
 
-The project is composed of three main layers:
+The system is designed to operate on strict **chronological match data** to prevent data leakage. Here is how data flows from the web into a final prediction:
 
-## 1. Data & Feature Pipeline
+### 1. Data Collection (Scraping)
 
-```
-matches_cleaned.csv → features.py → data/data.csv
-```
+Historical tournament IDs are loaded from `tournament_ids.csv`. The scraper (`tournament_id_scraper.py` and `match_scraper.py`) visits Tournament Software / FIR websites, handling both legacy and modern layouts. It extracts match dates, player names, and sport-by-sport scores, outputting everything to a unified raw `matches.csv`.
 
-## 2. Model Layer
+### 2. Cleaning & Normalization
 
-- Baseline: Ridge regression
-- Tier 1: CatBoost (tabular)
-- Tier 2: Player embedding neural network (PyTorch)
+Raw scraped data often contains walkovers, doubles matches, or corrupted scores. The cleaning step (`data_clean.py`) filters out non-standard matches and normalizes player names (e.g., removing seeding tags like `[3]`). Consistent identity is critical because the feature pipeline relies on it to build accurate player histories. The result is `matches_cleaned.csv`.
 
-## 3. Inference Layer
+### 3. Dynamic Ratings & Feature Engineering
 
-- Synthetic matchup builder
-- Score reconstruction logic
-- Pretty-print / API-style prediction output
+Implemented in `features.py`. The system processes matches **in strict time order**. Before a match is processed, features are extracted for the two players based _only_ on their history up to that exact moment. Features include:
+
+- **Dynamic Elo-style Ratings**: A custom, sport-specific rating system that translates rating differences into expected score differentials via a bounded nonlinear mapping (`tanh`).
+- **Recent Form**: Rolling windows tracking recent score margins, residual performance (actual vs. expected), and momentum.
+- **Head-to-Head (H2H)**: Pairwise history, both overall and sport-specific.
+
+After features are generated, the match results update the underlying player states.
+
+### 4. Model Training
+
+The final production model uses **CatBoost** gradient-boosted decision trees. For each sport, three separate regressors are trained:
+
+1. **Base Differential Model**: Predicts the point difference using stable, long-term features (ratings, overall H2H).
+2. **Residual Correction Model**: Refines the base prediction using short-term form and momentum.
+3. **Total Points Model**: Predicts the total points scored in the sport, which helps determine the pace and realistic scoreline.
+
+### 5. Inference & Score Reconstruction
+
+To predict a match between two players (even if they have never played each other), the inference system:
+
+1. Looks up the latest saved state for both players from `inference_state.pkl`.
+2. Synthesizes a new feature row representing the hypothetical matchup.
+3. Feeds the row through the sport-specific models.
+4. **Reconstructs realistic scores**: Converts the continuous predictions (e.g., diff of `+3.5`, total of `38.5`) into valid racketlon scorelines (e.g., `21-17`).
 
 ---
 
-# 📊 Data Pipeline
+# 💻 Usage & API
 
-## Input Schema
+The entire pipeline is wrapped in `funcs.py`, which provides a clean service-layer interface for application integration.
 
-Raw match data (`matches_cleaned.csv`) contains:
-
-- players (`team1_players`, `team2_players`)
-- scores per sport (`TT_p1`, `TT_p2`, etc.)
-- match timestamps
-
----
-
-## Chronological Ordering
-
-All processing is done in **strict time order**:
+**Running a Prediction:**
 
 ```python
-df = df.sort_values("datetime")
+from funcs import matchup_bundle
+
+# Predicts outcome, plus detailed state metrics for both players
+result = matchup_bundle("zain magdon-ismail", "patrick moran")
+
+print(result["prediction"]["winner"])
 ```
 
-This guarantees:
-
-- no future information is used
-- all features are pre-match
-
----
-
-## Feature Construction
-
-Implemented in:
+**Rebuilding the Pipeline:**
+You can trigger a full end-to-end rebuild (optionally scraping new data, cleaning, generating features, and training the CatBoost models):
 
 ```python
-features.py
-```
+from funcs import rebuild_all
 
-Each row represents a **single match**, with features computed **before updating state**.
-
----
-
-## Feature Categories
-
-### 1. Current Ratings (Margin-Elo)
-
-Stateful structure:
-
-```python
-self.R[player][sport]
-self.games[player][sport]
-```
-
-Update rule:
-
-```python
-error = actual_diff - predicted_diff
-step = eta * error * gradient
-```
-
-Stored features:
-
-```text
-TT_rating_p1
-TT_rating_p2
-TT_rating_diff
+# Complete refresh of data, features, and model weights
+rebuild_all(scrape=False)
 ```
 
 ---
 
-### 2. Snapshot Ratings (Monthly)
+## 🧠 Model Tiers Explored
 
-Computed using:
+While **CatBoost** is the current production model, the project explored several approaches to evaluate how much performance comes from the model versus the features:
 
-- batched monthly updates
-- iterative smoothing
-- alpha fitting (in original system)
-
-Stored as:
-
-```text
-TT_snapshot_rating_p1
-TT_snapshot_rating_p2
-TT_snapshot_rating_diff
-```
-
-Key property:
-
-- **constant within a month**
-- independent of match order inside that month
+- **Baseline (Ridge Regression)**: A regularized linear model. Proved that the engineered features (like rating diffs and recent form) already capture the vast majority of the predictive signal.
+- **Tier 2 (Player Embedding Neural Network)**: A PyTorch-based MLP that learned 16-dimensional embeddings for each player alongside the tabular features. It performed similarly to Ridge/CatBoost, reinforcing that the hand-engineered representation is extremely strong.
 
 ---
 
-### 3. Head-to-Head (H2H)
-
-Maintained per player pair:
-
-```python
-(pair_key) → H2HStats
-```
-
-Tracked:
-
-- games played
-- winrate
-- average diff
-- last match date
-
-Stored as:
-
-```text
-TT_h2h_games
-TT_h2h_winrate_p1
-TT_h2h_avg_diff_p1
-TT_h2h_days_since_last
-```
-
----
-
-### 4. Experience
-
-Tracks number of matches per player:
-
-```text
-TT_games_p1
-TT_games_p2
-TT_games_diff
-```
-
-Used as a proxy for:
-
-- confidence
-- rating reliability
-
----
-
-## Targets
-
-Per sport:
-
-```text
-TT_y_diff
-TT_y_total
-```
-
-Match-level:
-
-```text
-y_total_diff
-y_winner_p1
-```
-
----
-
-# 🧠 Model Implementations
-
----
-
-## 🥉 Baseline (Ridge)
-
-File:
-
-```python
-baseline.py
-```
-
-### Structure
-
-For each sport:
-
-```python
-model_diff = Ridge()
-model_total = Ridge()
-```
-
-Features:
-
-```text
-delta_diff
-delta_total
-sum_total
-```
-
----
-
-## 🥈 Tier 1 (CatBoost)
-
-File:
-
-```python
-catboost_regressor.py
-```
-
-### Design
-
-- Separate model per sport
-- Two regressors per sport:
-  - diff
-  - total
-
-### Feature Filtering
-
-Explicitly removes:
-
-```python
-if "_pred_diff" in c: continue
-if c.startswith("has_"): continue
-```
-
-Ensures:
-
-- no redundant transforms
-- no leakage
-
----
-
-### Training Loop
-
-```python
-for sport in SPORTS:
-    model_diff.fit(X_train, y_diff)
-    model_total.fit(X_train, y_total)
-```
-
-Predictions are clipped:
-
-```python
-pred_diff = np.clip(..., -21, 21)
-pred_total = np.clip(..., 0, 42)
-```
-
----
-
-## 🥇 Tier 2 (Player Embedding Model)
-
-File:
-
-```python
-player_embedding_fin.py
-```
-
----
-
-## Architecture
-
-```text
-Embedding(p1) → e1
-Embedding(p2) → e2
-
-Feature vector:
-[e1, e2, e1 - e2, e1 * e2, numeric_features]
-
-→ MLP → (diff, total)
-```
-
----
-
-### Model Definition
-
-```python
-self.embed = nn.Embedding(n_players + 1, embed_dim)
-self.backbone = nn.Sequential(...)
-self.head = nn.Linear(...)
-```
-
----
-
-### Input Construction
-
-```python
-x = torch.cat([
-    e1,
-    e2,
-    e1 - e2,
-    e1 * e2,
-    numeric_features
-], dim=1)
-```
-
----
-
-### Loss
-
-```python
-loss = SmoothL1(diff) + SmoothL1(total)
-```
-
----
-
-### Training
-
-- batched gradient descent
-- AdamW optimizer
-- early stopping on validation loss
-
----
-
-# 🔁 Inference Pipeline
-
----
-
-## Problem
-
-We must predict for **unseen matchups**.
-
-We cannot rely on:
-
-```text
-latest row where p1 vs p2 occurred
-```
-
----
-
-## Solution: Synthetic Row Construction
-
-Implemented in:
-
-```python
-build_synthetic_match_row(...)
-```
-
----
-
-### Steps
-
-#### 1. Get player states
-
-```python
-s1 = get_latest_player_state(df, player1)
-s2 = get_latest_player_state(df, player2)
-```
-
-Each player is normalized to be `p1`.
-
----
-
-#### 2. Merge features
-
-```python
-rating_diff = r1 - r2
-games_diff = g1 - g2
-```
-
----
-
-#### 3. Add H2H
-
-If exists:
-
-```python
-pair_row = get_latest_pair_h2h_row(...)
-```
-
-Else:
-
-```python
-h2h_games = 0
-h2h_winrate = 0.5
-```
-
----
-
-#### 4. Construct final row
-
-```python
-return pd.Series({
-    col: row.get(col, np.nan)
-})
-```
-
----
-
-# 🎯 Score Reconstruction
-
-Models output:
-
-```text
-pred_diff
-pred_total
-```
-
-Converted to scores:
-
-```python
-s1 = 0.5 * (total + diff)
-s2 = 0.5 * (total - diff)
-```
-
----
-
-## Non-Tennis Sports
-
-Forced into valid format:
-
-```text
-21 - x  or  x - 21
-```
-
----
-
-## Tennis
-
-Two modes:
-
-### Independent
-
-```python
-decode_full_game_score(...)
-```
-
-### Racketlon Stop Rule
-
-```python
-decode_tennis_score(...)
-```
-
-Uses:
-
-```text
-running_diff_before_tn
-```
-
----
-
-# 💾 Model Packaging
-
-Each model saves:
-
-```text
-player_embedding_package.pt
-data_snapshot.pkl
-metrics.json
-plots/
-```
-
----
-
-## Package Contents
-
-```python
-{
-  "state_dicts": model weights,
-  "feature_cols": feature list,
-  "player_to_idx": mapping,
-  "model_meta": normalization stats
-}
-```
-
----
-
-## Loading
-
-```python
-predictor = PredictorPackage.load(path)
-```
-
----
-
-## Prediction
-
-```python
-predictor.predict_pair(player1, player2)
-```
-
----
-
-# 🧩 Key Design Decisions
-
----
-
-## 1. Chronological training
-
-- avoids leakage
-- simulates real prediction
-
----
-
-## 2. Explicit feature filtering
-
-- removes derived features
-- reduces redundancy
-
----
-
-## 3. Dual rating system
-
-- snapshot → long-term
-- current → short-term
-
----
-
-## 4. Synthetic inference
-
-- enables unseen pair prediction
-- decouples model from dataset structure
-
----
-
-## 5. Separate sport models
-
-- each sport has different dynamics
-- avoids forcing shared distributions
-
----
-
-# 🏁 Summary
-
-This system implements:
-
-- a leakage-safe feature pipeline
-- multiple model tiers
-- a reusable prediction package
-- a generalizable inference system
-
-The implementation prioritizes:
-
-- correctness of temporal logic
-- flexibility of feature construction
-- extensibility for future models
+## 🧩 Key Design Decisions
+
+- **Chronological Strictness**: Avoiding "future leakage" is the hardest part of sports modeling. Sorting data by datetime and generating features strictly from past matches ensures integrity for future deployment.
+- **Regression over Classification**: We predict sport differentials and totals instead of just "who wins." This preserves valuable margin-of-victory information and allows us to reconstruct realistic game scores.
+- **Synthetic Inference**: Decoupling the training matrix from the inference state allows the model to instantly simulate hypothetical matchups without retraining.
+- **Separate Sport Models**: Because Racketlon combines four distinct sports, each sport has its own unique scoring pacing and distribution, requiring independently tuned regressors.

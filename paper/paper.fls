@@ -262,6 +262,10 @@ INPUT ./figures/confidence_bins_mae.png
 INPUT ./figures/confidence_bins_mae.png
 INPUT ./figures/confidence_bins_mae.png
 INPUT ./figures/confidence_bins_mae.png
+INPUT /usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/t1lmtt.fd
+INPUT /usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/t1lmtt.fd
+INPUT /usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/t1lmtt.fd
+INPUT /usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/ec-lmtt10.tfm
 INPUT paper.aux
 INPUT ./paper.out
 INPUT ./paper.out
@@ -277,4 +281,5 @@ INPUT /usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmr7.pfb
 INPUT /usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmri10.pfb
 INPUT /usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmsy10.pfb
 INPUT /usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmsy7.pfb
+INPUT /usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmtt10.pfb
 INPUT /usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb

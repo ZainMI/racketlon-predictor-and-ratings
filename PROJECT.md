@@ -45,18 +45,18 @@ In addition to predictive performance, a second goal was to produce a system tha
 At the sport level, for each sport $s \in \{TT, BD, SQ, TN\}$, the project predicts:
 
 - sport point differential:
-  $y^{(s)}_{\text{diff}} = s_{p1} - s_{p2}$
+  $$y^{(s)}_{\text{diff}} = s_{p1} - s_{p2}$$
 
 - sport total points:
-  $y^{(s)}_{\text{total}} = s_{p1} + s_{p2}$
+  $$y^{(s)}_{\text{total}} = s_{p1} + s_{p2}$$
 
 At the match level, the total score differential is:
 
-$y_{\text{total diff}} = \sum_{s}(s_{p1} - s_{p2})$
+$$y_{\text{total diff}} = \sum_{s}(s_{p1} - s_{p2})$$
 
 The winner target is then:
 
-$y_{\text{winner}} = \mathbf{1}(y_{\text{total diff}} > 0)$
+$$y_{\text{winner}} = \mathbf{1}(y_{\text{total diff}} > 0)$$
 
 This structure was chosen because directly predicting only the winner would throw away a large amount of useful information. Predicting the score differential and sport totals supports:
 
@@ -76,7 +76,7 @@ Therefore, the core problem is treated as a structured regression task rather th
 
 ## 3. Data Collection
 
-## 3.1 Source website structure
+### 3.1 Source website structure
 
 Historical results were collected from Tournament Software / FIR tournament pages. A complication in the project was that the site exists in multiple layouts depending on tournament age and page version. Two major formats had to be supported:
 
@@ -90,11 +90,11 @@ Historical results were collected from Tournament Software / FIR tournament page
 
 Because older tournaments and newer tournaments used different HTML structures, the scraper had to be hybrid rather than assuming one fixed page layout.
 
-## 3.2 Tournament ID loading
+### 3.2 Tournament ID loading
 
 The scraper begins from a file `tournament_ids.csv` that stores tournament GUIDs. These IDs act as the root input to the scraping system. Each tournament ID is normalized and processed in turn.
 
-## 3.3 Resumable scraping
+### 3.3 Resumable scraping
 
 To make large-scale scraping reliable, the script uses a persistent state file:
 
@@ -102,7 +102,7 @@ To make large-scale scraping reliable, the script uses a persistent state file:
 
 This file records completed tournaments so that if scraping is interrupted, the script can resume from where it left off. This avoids re-downloading previously processed tournaments and makes the pipeline robust for long-running jobs.
 
-## 3.4 Request handling and retries
+### 3.4 Request handling and retries
 
 The scraper uses HTTP requests with:
 
@@ -113,7 +113,7 @@ The scraper uses HTTP requests with:
 
 This is important because tournament websites occasionally fail temporarily or throttle requests.
 
-## 3.5 New-mode scraping logic
+### 3.5 New-mode scraping logic
 
 In the newer tournament format, the scraper:
 
@@ -133,7 +133,7 @@ In the newer tournament format, the scraper:
 
 The parser also recovers player IDs, nationality IDs, and club IDs when available.
 
-## 3.6 Legacy-mode scraping logic
+### 3.6 Legacy-mode scraping logic
 
 In the older format, the scraper:
 
@@ -146,7 +146,7 @@ In the older format, the scraper:
 
 Legacy pages are less standardized, so the parser uses more robust fallback rules.
 
-## 3.7 Unified raw output
+### 3.7 Unified raw output
 
 Regardless of source mode, both scraping branches produce the same row schema. This unified schema includes:
 
@@ -181,7 +181,7 @@ These rows are appended into `matches.csv`.
 
 The raw scraped data is not directly suitable for modeling. Some rows correspond to irrelevant events or malformed records. The cleaning stage creates a stricter racketlon-only dataset.
 
-## 4.1 Removed rows
+### 4.1 Removed rows
 
 The cleaning script removes matches that satisfy any of the following:
 
@@ -200,7 +200,7 @@ These usually indicate formats that are not standard singles racketlon matches.
 
 The squash requirement was especially useful because valid racketlon matches should include all four sports, and missing squash often indicated incomplete or corrupted records.
 
-## 4.2 Name normalization
+### 4.2 Name normalization
 
 Player names are normalized by:
 
@@ -212,7 +212,7 @@ This is crucial because the feature engineering pipeline relies heavily on consi
 
 If `"Zain Magdon-Ismail"` and `"zain magdon-ismail [3]"` were treated as different players, the rating and history system would break down.
 
-## 4.3 Cleaned output
+### 4.3 Cleaned output
 
 The cleaner produces:
 
@@ -239,7 +239,7 @@ That makes the dataset **leakage-safe**.
 
 ---
 
-## 5.1 Core state objects
+### 5.1 Core state objects
 
 The feature pipeline maintains several kinds of evolving state as it iterates chronologically through matches:
 
@@ -260,7 +260,7 @@ This order guarantees correctness for future prediction.
 
 ---
 
-## 5.2 Time handling
+### 5.2 Time handling
 
 The helper `safe_datetime()` constructs a usable chronological timestamp from:
 
@@ -272,7 +272,7 @@ This allows matches to be ordered correctly and enables time-based features such
 
 ---
 
-## 5.3 Dynamic one-rating-per-sport system
+### 5.3 Dynamic one-rating-per-sport system
 
 A central part of the project is the custom rating model `DecayedUpdateMarginElo`.
 
@@ -285,11 +285,11 @@ Each player has one scalar rating per sport:
 
 This is a compact, sport-specific latent strength representation.
 
-### 5.3.1 Rating-to-score mapping
+#### 5.3.1 Rating-to-score mapping
 
 A raw rating difference is converted to an expected point differential using:
 
-$\hat{d} = 21 \cdot \tanh\left(\frac{\alpha x}{2}\right)$
+$$\hat{d} = 21 \cdot \tanh\left(\frac{\alpha x}{2}\right)$$
 
 where:
 
@@ -304,7 +304,7 @@ This mapping has several advantages:
 - it behaves almost linearly near zero
 - it is sport-specific through $\alpha$
 
-### 5.3.2 Alpha values
+#### 5.3.2 Alpha values
 
 The values used were:
 
@@ -317,11 +317,11 @@ These control how rapidly rating differences translate into score expectations.
 
 Higher $\alpha$ means smaller rating differences produce stronger expected score differentials.
 
-### 5.3.3 Learning rate schedule
+#### 5.3.3 Learning rate schedule
 
 The update size depends on experience:
 
-$\eta(g) = \eta_{\min} + (\eta_{\max} - \eta_{\min}) e^{-g/\tau}$
+$$\eta(g) = \eta_{\min} + (\eta_{\max} - \eta_{\min}) e^{-g/\tau}$$
 
 Parameters:
 
@@ -334,13 +334,13 @@ Interpretation:
 - early in a player's history, ratings move quickly
 - after many matches, ratings stabilize
 
-### 5.3.4 Time-based update multiplier
+#### 5.3.4 Time-based update multiplier
 
 If a player has been inactive, the next result is allowed to update the rating more strongly.
 
 The multiplier is:
 
-$\mathrm{time\_mult} = 1 + c_s \left(1 - e^{-d/\tau_s}\right)$
+$$\mathrm{time\_mult} = 1 + c_s \left(1 - e^{-d/\tau_s}\right)$$
 
 where:
 
@@ -365,11 +365,11 @@ Parameters:
   - $c = 0.5$
   - $\tau = 120$
 
-### 5.3.5 Margin-sensitive updates
+#### 5.3.5 Margin-sensitive updates
 
 The update also scales with observed match margin:
 
-$\mathrm{margin\_mult} = 1 + m_s \cdot \frac{|d|}{21}$
+$$\mathrm{margin\_mult} = 1 + m_s \cdot \frac{|d|}{21}$$
 
 where $m_s$ is sport-specific:
 
@@ -380,15 +380,15 @@ where $m_s$ is sport-specific:
 
 This lets bigger wins or losses matter more than narrow results.
 
-### 5.3.6 Gradient term
+#### 5.3.6 Gradient term
 
 Because the prediction mapping is nonlinear, the update uses the derivative of the tanh transform:
 
-$\frac{d\hat{d}}{dx} = 21 \cdot \frac{\alpha}{2}(1 - \tanh^2(\alpha x / 2))$
+$$\frac{d\hat{d}}{dx} = 21 \cdot \frac{\alpha}{2}(1 - \tanh^2(\alpha x / 2))$$
 
 This ensures the learning signal behaves properly depending on where the players lie in rating space.
 
-### 5.3.7 L2 regularization in rating updates
+#### 5.3.7 L2 regularization in rating updates
 
 A small L2 term is applied against rating difference growth:
 
@@ -396,17 +396,17 @@ A small L2 term is applied against rating difference growth:
 
 This is a very mild stabilizer rather than a strong shrinkage force.
 
-### 5.3.8 Full update intuition
+#### 5.3.8 Full update intuition
 
 The update is approximately:
 
-$\Delta x \propto \eta \cdot \mathrm{time\_mult} \cdot \mathrm{margin\_mult} \cdot (d - \hat{d}) \cdot \frac{d\hat{d}}{dx}$
+$$\Delta x \propto \eta \cdot \mathrm{time\_mult} \cdot \mathrm{margin\_mult} \cdot (d - \hat{d}) \cdot \frac{d\hat{d}}{dx}$$
 
 So the system behaves like a nonlinear error-correcting margin-sensitive Elo variant.
 
 ---
 
-## 5.4 Recent-form feature state
+### 5.4 Recent-form feature state
 
 The project maintains rolling history windows per player and sport using `RollingWindow`.
 
@@ -416,7 +416,7 @@ These track recent match sequences of various lengths:
 - 10
 - 20
 
-### 5.4.1 Stored recent metrics
+#### 5.4.1 Stored recent metrics
 
 For each player and sport, the pipeline tracks:
 
@@ -430,26 +430,26 @@ For each player and sport, the pipeline tracks:
 - favorite/underdog behavior
 - exponentially weighted moving average
 
-### 5.4.2 Meaning of residuals
+#### 5.4.2 Meaning of residuals
 
 Residuals are defined as:
 
-$\text{residual} = \text{actual diff} - \text{expected diff}$
+$$\text{residual} = \text{actual diff} - \text{expected diff}$$
 
 This is useful because it measures whether a player is overperforming or underperforming relative to rating-based expectation.
 
-### 5.4.3 Momentum
+#### 5.4.3 Momentum
 
 Momentum is defined as:
 
-$\text{momentum diff}_{5,20} = \text{mean diff over last 5} - \text{mean diff over last 20}$
+$$\text{momentum diff}_{5,20} = \text{mean diff over last 5} - \text{mean diff over last 20}$$
 
 This gives a simple trend signal:
 
 - positive means short-term performance is improving
 - negative means form may be fading
 
-### 5.4.4 Why rolling features matter
+#### 5.4.4 Why rolling features matter
 
 The rating alone is intended to capture broad medium-term strength. Recent features capture things the rating may not move fast enough to reflect, such as:
 
@@ -461,7 +461,7 @@ The rating alone is intended to capture broad medium-term strength. Recent featu
 
 ---
 
-## 5.5 Long-term shrunk features
+### 5.5 Long-term shrunk features
 
 In addition to recent windows, each player and sport maintains long-term aggregates:
 
@@ -472,7 +472,7 @@ In addition to recent windows, each player and sport maintains long-term aggrega
 
 These are converted into shrunk estimates:
 
-$\text{long estimate} = \frac{\text{sum}}{n + \lambda}$
+$$\text{long estimate} = \frac{\text{sum}}{n + \lambda}$$
 
 with:
 
@@ -491,18 +491,18 @@ These help distinguish players with similar recent form but very different histo
 
 ---
 
-## 5.6 Head-to-head features
+### 5.6 Head-to-head features
 
 For each player pair, the project stores both overall and sport-specific head-to-head information.
 
-### 5.6.1 Overall H2H features
+#### 5.6.1 Overall H2H features
 
 - total prior meetings
 - average prior total-diff from player 1 perspective
 - win rate from player 1 perspective
 - days since last meeting
 
-### 5.6.2 Sport-specific H2H features
+#### 5.6.2 Sport-specific H2H features
 
 For each sport:
 
@@ -515,7 +515,7 @@ These features are valuable because some player matchups are consistently favora
 
 ---
 
-## 5.7 Output dataset structure
+### 5.7 Output dataset structure
 
 The feature pipeline writes a reduced final dataset containing:
 
@@ -559,7 +559,7 @@ This reduced dataset was designed to keep the useful features while avoiding blo
 
 ---
 
-## 5.8 Inference state
+### 5.8 Inference state
 
 The pipeline also saves:
 
@@ -585,7 +585,7 @@ Several modeling approaches were tested before settling on the final production 
 
 ---
 
-## 6.1 Simple historical-average benchmark
+### 6.1 Simple historical-average benchmark
 
 This benchmark predicts sport differentials using player historical averages.
 
@@ -597,7 +597,7 @@ For each player and sport, it computes:
 
 Prediction is then:
 
-$\hat{d}^{(s)} = \bar{d}^{(s)}_{p1} - \bar{d}^{(s)}_{p2}$
+$$\hat{d}^{(s)} = \bar{d}^{(s)}_{p1} - \bar{d}^{(s)}_{p2}$$
 
 And the sport total is estimated from average totals.
 
@@ -626,13 +626,13 @@ This demonstrated that historical averages already carry substantial predictive 
 
 ---
 
-## 6.2 Ridge regression benchmark
+### 6.2 Ridge regression benchmark
 
 A stronger baseline was built using Ridge regression.
 
 Ridge solves:
 
-$\min_w ||y - Xw||^2 + \alpha ||w||^2$
+$$\min_w ||y - Xw||^2 + \alpha ||w||^2$$
 
 where:
 
@@ -662,11 +662,11 @@ Although it was called a benchmark, this model was stronger than a trivial basel
 
 ---
 
-## 6.3 Player embedding neural network
+### 6.3 Player embedding neural network
 
 A PyTorch-based neural model was also explored.
 
-### 6.3.1 Representation
+#### 6.3.1 Representation
 
 Each player is given an embedding vector $e_p$ of dimension 16.
 
@@ -680,7 +680,7 @@ Given players $p_1$ and $p_2$, the model forms input from:
 
 This allows the model to learn latent player identity effects that may not be fully captured by hand-engineered statistics.
 
-### 6.3.2 Architecture
+#### 6.3.2 Architecture
 
 - embedding dimension: `16`
 - hidden layers: `[128, 64]`
@@ -691,7 +691,7 @@ The final head outputs two values:
 - predicted sport diff
 - predicted sport total
 
-### 6.3.3 Optimization details
+#### 6.3.3 Optimization details
 
 - optimizer: `AdamW`
 - learning rate: `1e-3`
@@ -701,7 +701,7 @@ The final head outputs two values:
 - epochs: `80`
 - early stopping patience: `10`
 
-### 6.3.4 Interpretation
+#### 6.3.4 Interpretation
 
 This model tries to learn player-specific latent traits, but on this project’s tabular data, it did not surpass the final boosted-tree system.
 
@@ -722,7 +722,7 @@ It was the strongest overall model in terms of:
 
 ---
 
-## 7.1 Why gradient-boosted trees were a good fit
+### 7.1 Why gradient-boosted trees were a good fit
 
 Gradient-boosted trees are especially effective for structured tabular data because they:
 
@@ -736,7 +736,7 @@ In this project, the features were already information-dense and semantically me
 
 ---
 
-## 7.2 Per-sport decomposition
+### 7.2 Per-sport decomposition
 
 For each sport, three separate regressors are trained:
 
@@ -746,19 +746,19 @@ For each sport, three separate regressors are trained:
 
 This means each sport has its own structured prediction pipeline.
 
-### 7.2.1 Base differential model
+#### 7.2.1 Base differential model
 
 The base model predicts the main sport differential from stable, matchup-level features.
 
 This model is responsible for broad skill-gap prediction.
 
-### 7.2.2 Residual correction model
+#### 7.2.2 Residual correction model
 
 The residual model learns to correct the remaining error of the base model.
 
 If the base model prediction is $b$ and the residual model prediction is $r$, then the raw differential prediction is:
 
-$\hat{d}_{raw} = b + \gamma r$
+$$\hat{d}_{raw} = b + \gamma r$$
 
 where:
 
@@ -766,11 +766,11 @@ where:
 
 This residual scaling was chosen to avoid overcorrection and to keep the residual model as a refinement rather than a replacement.
 
-### 7.2.3 Differential calibration
+#### 7.2.3 Differential calibration
 
 After base + residual combination, a linear calibrator is fit:
 
-$\hat{d}_{final} = a + b \hat{d}_{raw}$
+$$\hat{d}_{final} = a + b \hat{d}_{raw}$$
 
 The calibrator parameters are clipped:
 
@@ -779,7 +779,7 @@ The calibrator parameters are clipped:
 
 This helps correct under-dispersion or systematic bias in the raw differential model.
 
-### 7.2.4 Total-points model
+#### 7.2.4 Total-points model
 
 A separate model predicts total points in the sport. This is important because the same point differential can correspond to different realistic scorelines.
 
@@ -789,11 +789,11 @@ For example:
 
 ---
 
-## 7.3 Feature groups used by the final model
+### 7.3 Feature groups used by the final model
 
 The final tree system intentionally used **compact feature groups** rather than every possible engineered feature.
 
-### 7.3.1 Base differential features
+#### 7.3.1 Base differential features
 
 The base differential model uses stable matchup descriptors:
 
@@ -812,7 +812,7 @@ The base differential model uses stable matchup descriptors:
 
 These are the broad, relatively slow-moving descriptors of player strength and matchup history.
 
-### 7.3.2 Residual model features
+#### 7.3.2 Residual model features
 
 The residual correction model focuses on short-term mismatch between the base estimate and recent evidence:
 
@@ -830,7 +830,7 @@ Two extra meta-features are added:
 
 These allow the residual model to condition its correction on the size and direction of the base estimate.
 
-### 7.3.3 Total-points model features
+#### 7.3.3 Total-points model features
 
 The total model uses a slightly broader set:
 
@@ -861,11 +861,11 @@ The inclusion of long-term total means makes sense because sport totals are more
 
 ---
 
-## 7.4 Hyperparameters
+### 7.4 Hyperparameters
 
 The final tree system uses three parameter sets.
 
-### 7.4.1 Base differential model parameters
+#### 7.4.1 Base differential model parameters
 
 - iterations: `900`
 - depth: `5`
@@ -876,7 +876,7 @@ The final tree system uses three parameter sets.
 - verbose: `False`
 - `l2_leaf_reg = 6`
 
-### 7.4.2 Residual differential model parameters
+#### 7.4.2 Residual differential model parameters
 
 - iterations: `700`
 - depth: `5`
@@ -887,7 +887,7 @@ The final tree system uses three parameter sets.
 - verbose: `False`
 - `l2_leaf_reg = 6`
 
-### 7.4.3 Total model parameters
+#### 7.4.3 Total model parameters
 
 - iterations: `800`
 - depth: `6`
@@ -900,7 +900,7 @@ The final tree system uses three parameter sets.
 
 ---
 
-## 7.5 Why these settings make sense
+### 7.5 Why these settings make sense
 
 ### Tree depth
 
@@ -932,33 +932,33 @@ These values reflect the relative complexity of the subtasks.
 
 ---
 
-## 7.6 Sample weighting
+### 7.6 Sample weighting
 
 The project also used sample weighting to reduce the tendency of the model to become too conservative.
 
-### 7.6.1 Differential weights
+#### 7.6.1 Differential weights
 
 For differential models:
 
-$w = 1 + 0.15 \cdot I(|d| \ge 5) + 0.30 \cdot I(|d| \ge 8) + 0.45 \cdot I(|d| \ge 12)$
+$$w = 1 + 0.15 \cdot I(|d| \ge 5) + 0.30 \cdot I(|d| \ge 8) + 0.45 \cdot I(|d| \ge 12)$$
 
 This gives more importance to stronger wins and losses, which are often harder to predict and easy for a model to underestimate.
 
-### 7.6.2 Residual weights
+#### 7.6.2 Residual weights
 
 Residual training uses the same structure, again encouraging attention to larger-magnitude cases.
 
-### 7.6.3 Total weights
+#### 7.6.3 Total weights
 
 For total points:
 
-$w = 1 + 0.02|y_{\text{total}} - 21|$
+$$w = 1 + 0.02|y_{\text{total}} - 21|$$
 
 This lightly emphasizes totals that deviate from a common midrange.
 
 ---
 
-## 7.7 Score reconstruction logic
+### 7.7 Score reconstruction logic
 
 The tree models output continuous predicted values:
 
@@ -967,20 +967,20 @@ The tree models output continuous predicted values:
 
 These are converted into plausible sport scores.
 
-### 7.7.1 Raw reconstruction
+#### 7.7.1 Raw reconstruction
 
 The continuous score estimates are:
 
-$s_1 = \frac{1}{2}(T + D)$
+$$s_1 = \frac{1}{2}(T + D)$$
 
-$s_2 = \frac{1}{2}(T - D)$
+$$s_2 = \frac{1}{2}(T - D)$$
 
 where:
 
 - $T$ = predicted total
 - $D$ = predicted differential
 
-### 7.7.2 Legal score decoding for TT/BD/SQ
+#### 7.7.2 Legal score decoding for TT/BD/SQ
 
 These sports are decoded into completed game scores of the form:
 
@@ -993,7 +993,7 @@ The loser score is blended between:
 
 This produces realistic outputs rather than mathematically valid but sport-inconsistent scores.
 
-### 7.7.3 Tennis decoding
+#### 7.7.3 Tennis decoding
 
 The system supports two options:
 
@@ -1008,7 +1008,7 @@ because this was more stable operationally.
 
 ---
 
-## 7.8 Training and packaging modes
+### 7.8 Training and packaging modes
 
 The model system supports two workflows:
 
@@ -1059,7 +1059,7 @@ Represent each matchup as a point in feature space. Then use a KD-tree to query 
 
 ---
 
-## 9.2 Experiment 1: Density-only confidence in 4D
+### 9.2 Experiment 1: Density-only confidence in 4D
 
 Feature space:
 
@@ -1080,7 +1080,7 @@ This showed that simple local density is not automatically a good proxy for pred
 
 ---
 
-## 9.3 Experiment 2: Local consistency confidence
+### 9.3 Experiment 2: Local consistency confidence
 
 Instead of density, confidence was based on how similar the outcomes of neighboring points were.
 
@@ -1090,7 +1090,7 @@ This worked better for a local weighted KNN regressor and showed that outcome co
 
 ---
 
-## 9.4 Experiment 3: Applying geometry to the boosted-tree predictor
+### 9.4 Experiment 3: Applying geometry to the boosted-tree predictor
 
 The same confidence idea was applied to the stronger gradient-boosted tree predictor, still in the simple 4D rating-difference space.
 
@@ -1101,7 +1101,7 @@ the feature space used for geometry was too simple relative to the richer nonlin
 
 ---
 
-## 9.5 Experiment 4: Expanded geometric feature space
+### 9.5 Experiment 4: Expanded geometric feature space
 
 The KD-tree space was expanded to include not only rating differences but also recent and residual summary features.
 

@@ -109,7 +109,7 @@ This project draws on three primary areas of prior work: rating systems for comp
 
 \subsection{Rating Systems and Skill Modeling}
 
-Classical rating systems such as Elo \cite{elo1978} provide a principled framework for modeling player skill through pairwise competition. These systems are attractive because they are interpretable, sequentially updatable, and robust to sparse data. However, standard Elo formulations are primarily designed for win/loss outcomes and do not directly incorporate score margins.
+Classical rating systems such as Elo \citep{elo1978} provide a principled framework for modeling player skill through pairwise competition. These systems are attractive because they are interpretable, sequentially updatable, and robust to sparse data. However, standard Elo formulations are primarily designed for win/loss outcomes and do not directly incorporate score margins.
 
 In sports where score differentials provide additional signal, extensions to Elo incorporate margin-of-victory information and nonlinear mappings between skill difference and outcome. This motivates the dynamic rating system used in this work, which maps rating differences to expected score differences using a bounded nonlinear transformation. This formulation better reflects the constraints of Racketlon scoring, where outcomes are naturally limited by the rules of each sport.
 
@@ -117,19 +117,19 @@ In sports where score differentials provide additional signal, extensions to Elo
 
 Structured prediction problems with engineered features are commonly addressed using linear models and tree-based ensembles. Regularized linear models provide a simple and interpretable baseline by learning additive relationships between features. However, they cannot capture interactions between features or nonlinear effects.
 
-Gradient boosting \cite{friedman2001} is widely regarded as one of the most effective approaches for tabular data. Modern implementations such as XGBoost \cite{chen2016xgboost} and LightGBM \cite{ke2017lightgbm} construct ensembles of decision trees that can model threshold effects and complex feature interactions. This motivates the use of boosted trees as the final model in this project, particularly given the structured and heterogeneous nature of the feature set.
+Gradient boosting \citep{friedman2001} is widely regarded as one of the most effective approaches for tabular data. Modern implementations such as XGBoost \citep{chen2016xgboost} and LightGBM \citep{ke2017lightgbm} construct ensembles of decision trees that can model threshold effects and complex feature interactions. This motivates the use of boosted trees as the final model in this project, particularly given the structured and heterogeneous nature of the feature set.
 
 \subsection{Representation Learning and Player Embeddings}
 
-Embedding-based models provide a way to learn latent representations of entities such as players. These approaches are widely used in recommender systems and natural language processing \cite{koren2009matrix, mikolov2013word2vec}, where they capture similarity relationships that are not explicitly encoded in the input features.
+Embedding-based models provide a way to learn latent representations of entities such as players. These approaches are widely used in recommender systems and natural language processing \citep{koren2009matrix, mikolov2013word2vec}, where they capture similarity relationships that are not explicitly encoded in the input features.
 
 In this project, player embeddings are used to model latent aspects of player skill and interaction effects. While this approach is flexible, prior work has shown that neural networks do not always outperform simpler models on structured tabular data. This motivates evaluating embedding models alongside linear and tree-based approaches rather than assuming their superiority.
 
 \subsection{Confidence and Uncertainty Estimation}
 
-In addition to predictive accuracy, it is often desirable to estimate the confidence or reliability of predictions. Classical approaches include probabilistic models, Bayesian methods, and ensemble-based uncertainty estimation. In non-parametric settings, nearest-neighbor methods \cite{cover1967} use local neighborhood structure as a proxy for confidence, under the assumption that similar inputs yield similar outputs.
+In addition to predictive accuracy, it is often desirable to estimate the confidence or reliability of predictions. Classical approaches include probabilistic models, Bayesian methods, and ensemble-based uncertainty estimation. In non-parametric settings, nearest-neighbor methods \citep{cover1967} use local neighborhood structure as a proxy for confidence, under the assumption that similar inputs yield similar outputs.
 
-KD-trees \cite{bentley1975} provide an efficient data structure for nearest-neighbor search and are commonly used to analyze local geometry in feature space. In this work, KD-trees are used in a secondary experiment to test whether local density and outcome consistency correlate with prediction error. This experiment provides insight into the relationship between geometric similarity and model uncertainty in structured prediction problems.
+KD-trees \citep{bentley1975} provide an efficient data structure for nearest-neighbor search and are commonly used to analyze local geometry in feature space. In this work, KD-trees are used in a secondary experiment to test whether local density and outcome consistency correlate with prediction error. This experiment provides insight into the relationship between geometric similarity and model uncertainty in structured prediction problems.
 
 % =========================================================
 \section{Data Collection and Cleaning}
@@ -293,7 +293,7 @@ This model is strong because the feature set is already informative. However, it
 
 \subsection{Player Embedding Model}
 
-To introduce learned latent structure, I trained a neural model with player embeddings. Each player $p$ is assigned a learned vector
+To introduce learned latent structure, I trained a PyTorch-based neural model with player embeddings. Each player $p$ is assigned a learned vector
 \[
     e_p \in \mathbb{R}^{16}.
 \]
@@ -314,7 +314,7 @@ This architecture is expressive enough to learn latent similarities between play
 
 \subsection{Gradient Boosted Trees}
 
-The final model is a gradient boosted tree system trained separately by sport. For each sport, three regressors are used:
+The final model is a gradient boosted tree system (implemented via CatBoost) trained separately by sport. For each sport, three regressors are used:
 \begin{enumerate}[leftmargin=1.2em,itemsep=0.25em]
     \item a base differential model,
     \item a residual correction model,
@@ -327,7 +327,7 @@ The final sport differential prediction is
 \]
 where $b$ is the base prediction and $r$ is the residual correction.
 
-This architecture allows the model to first learn broad, stable skill-gap structure and then refine its prediction using residual patterns. The tree-based formulation is especially useful for capturing threshold effects and nonlinear interactions. For example, the effect of head-to-head history may depend on rating gap, and recent form may matter more in close matches than in highly asymmetric ones.
+This architecture allows the model to first learn broad, stable skill-gap structure and then refine its prediction using residual patterns. The tree-based formulation is especially useful for capturing threshold effects and nonlinear interactions. For example, the effect of head-to-head history may depend on rating gap, and recent form may matter more in close matches than in highly asymmetric ones. Finally, the raw continuous outputs for total points and point differentials are decoded back into legal, sport-specific scorelines (e.g., forcing a 21-point game format for the first three sports).
 
 Even so, the improvement over simpler feature-based models is modest. This result is important: it suggests that the feature engineering pipeline already explains much of the structure that more flexible models would otherwise need to discover.
 
@@ -344,24 +344,28 @@ The primary match-level evaluation metrics are:
 
 These metrics complement one another. MAE measures quality of margin prediction, while winner accuracy measures practical classification performance. In general, winner accuracy is easier to optimize than exact score-difference prediction, since predicting the correct sign requires less precision than predicting the exact margin.
 
-All reported model comparisons in the main paper are based on the evaluation results shown in the presentation:
-\begin{center}
+% =========================================================
+\section{Results}
+
+The final boosted-tree model achieves the strongest overall match-level performance among the models considered, with mean absolute error 13.89 and winner accuracy 73.4\%. Figure~\ref{fig:scatter} shows predicted versus actual total match score difference, and Figure~\ref{fig:cm} shows the winner confusion matrix.
+
+Table~\ref{tab:results} details the evaluation metrics across all tested models.
+
+\begin{table}[H]
+    \centering
+    \caption{Model Performance Comparison}
+    \label{tab:results}
     \begin{tabular}{lcc}
         \toprule
         Model            & Match MAE & Accuracy \\
         \midrule
-        Baseline         & 16.7      & 66.0\%   \\
+        Baseline         & 16.70     & 66.0\%   \\
         Linear (Ridge)   & 14.05     & 73.3\%   \\
         Player Embedding & 14.00     & 72.8\%   \\
         Boosted Trees    & 13.89     & 73.4\%   \\
         \bottomrule
     \end{tabular}
-\end{center}
-
-% =========================================================
-\section{Results}
-
-The final boosted-tree model achieves the strongest overall match-level performance among the models considered, with mean absolute error 13.89 and winner accuracy 73.4\%. Figure~\ref{fig:scatter} shows predicted versus actual total match score difference, and Figure~\ref{fig:cm} shows the winner confusion matrix.
+\end{table}
 
 \begin{figure}[H]
     \centering
@@ -485,7 +489,8 @@ Future work could extend the system in several directions. Additional contextual
 \appendix
 
 % =========================================================
-\section{Appendix: Exploratory Confidence Analysis}
+\section{Appendix}
+\subsection{Exploratory Confidence Analysis}
 
 As a secondary experiment, I investigated whether local geometric structure in feature space could provide a proxy for confidence. The idea was that if a test match lies in a dense region of feature space, or if its nearby historical neighbors have highly consistent outcomes, then predictions in that region might be more reliable.
 
@@ -508,7 +513,7 @@ The confidence analysis is therefore best interpreted as a useful negative resul
 \end{figure}
 
 % =========================================================
-\section{Appendix: Reproducibility Notes}
+\subsection{Reproducibility Notes}
 
 The full pipeline can be reproduced from four main stages:
 \begin{enumerate}[leftmargin=1.2em,itemsep=0.25em]
@@ -519,5 +524,8 @@ The full pipeline can be reproduced from four main stages:
 \end{enumerate}
 
 The final system also includes a saved inference package capable of synthesizing future matchup features from player names and returning predicted sport-level and match-level outcomes.
+
+For reproducibility, the complete implementation is available at:
+\url{https://github.com/ZainMI/racketlon-predictor-and-ratings}.
 
 \end{document}

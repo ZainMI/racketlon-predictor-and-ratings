@@ -1,6 +1,6 @@
 # Fdb version 4
-["pdflatex"] 1776958153.83762 "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" "paper.pdf" "paper" 1776958154.52362 0
-  "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" 1776958152.89327 35222 84bc9d2038bca39ea9802283c761c250 ""
+["pdflatex"] 1776958916.09027 "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" "paper.pdf" "paper" 1776958916.8241 0
+  "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" 1776958915.92719 35659 d4d84c86ce4806bcbfe702479813a1bc ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/enc/dvips/lm/lm-ec.enc" 1254269338 2375 baa924870cfb487815765f9094cf3728 ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc" 1202520719 3486 c7eadf5dcc57b3b2d11736679f6636ba ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc" 1202520719 2405 5dcf2c1b967ee25cc46c58cd52244aed ""
@@ -22,6 +22,7 @@
   "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/ec-lmr5.tfm" 1254269338 12020 46464c854bf317de2a7a0bbe4a1160ca ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/ec-lmr7.tfm" 1254269338 12064 09aa3eeac96bf141d673bb1b0385ce55 ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/ec-lmri10.tfm" 1254269338 17148 9556e1b5f936b77a796f68d2d559ba99 ""
+  "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/ec-lmtt10.tfm" 1254269338 1372 2ef2c2b492b3c4cd7879fe083abbb061 ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/lmex10.tfm" 1148093231 992 ce925c9346c7613270a79afbee98c070 ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/lmmi10.tfm" 1148093231 1528 6d36b2385e0ca062a654de6ac59cb34f ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/lm/lmmi12.tfm" 1148093231 1524 753b192b18f2991794f9d41a8228510b ""
@@ -54,6 +55,7 @@
   "/usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmri10.pfb" 1255129361 112593 fda2373ba4420af33949610de4c28fe8 ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmsy10.pfb" 1254269338 27863 09ce3735688ffde955e72da27c95b61a ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmsy7.pfb" 1254269338 27941 d1f5d03f61a46c3fcc3a2ba904ddda52 ""
+  "/usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmtt10.pfb" 1255129361 113227 1010e11451afc2822c95dae77c390042 ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/context/base/mkii/supp-pdf.mkii" 1461363279 71627 94eb9990bed73c364d7f53f960cc8c5b ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/generic/bigintcalc/bigintcalc.sty" 1576625341 40635 c40361e206be584d448876bba8a64a3b ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/generic/bitset/bitset.sty" 1576016050 33961 6b5c75130e435b2bfdb9f480a09a39f9 ""
@@ -111,6 +113,7 @@
   "/usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/omxlmex.fd" 1616454256 568 a5494d810f2680caf10205cd1226c76c ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/ot1lmr.fd" 1616454256 1882 28c08db1407ebff35a658fd141753d16 ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/t1lmr.fd" 1616454256 1867 996fe743d88a01aca041ed22cc10e1bb ""
+  "/usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/t1lmtt.fd" 1616454256 2682 555da1faa2e266801e4b221d01a42cb5 ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/ts1lmr.fd" 1616454256 1914 884882d7ebb0fd65cea93fca77ff6f5a ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/latex/microtype/microtype-pdftex.def" 1752091573 49656 229fb67764dc0abf5c6f072ee0d27147 ""
   "/usr/local/texlive/2025basic/texmf-dist/tex/latex/microtype/microtype.cfg" 1752091573 27628 65e257a6863987c0e5097054c917d02d ""
@@ -134,9 +137,9 @@
   "figures/model_comparison_accuracy.png" 1776831949.40749 56906 b357216efd7a332e533ae9f9537b3dfd ""
   "figures/model_comparison_mae.png" 1776831949.36272 51557 2e91d0b1de8501492eba0fa4ecf73e4d ""
   "figures/winner_confusion_matrix.png" 1776832323.78947 17995 4c7504939bff856a8c9dc13bdfa4a666 ""
-  "paper.aux" 1776958154.47695 6407 6e87ed2827e13b4dd3d10a2dc90dd27e "pdflatex"
-  "paper.out" 1776958154.47747 5123 b54e726d3a0893854ab316e103ee0119 "pdflatex"
-  "paper.tex" 1776958152.89327 35222 84bc9d2038bca39ea9802283c761c250 ""
+  "paper.aux" 1776958916.76865 6720 0ad15479fa9f719659d50ba02d472f2e "pdflatex"
+  "paper.out" 1776958916.76926 5130 1d7930f4c2422334d1ffa001563c8a32 "pdflatex"
+  "paper.tex" 1776958915.92719 35659 d4d84c86ce4806bcbfe702479813a1bc ""
   (generated)
   "paper.aux"
   "paper.log"
