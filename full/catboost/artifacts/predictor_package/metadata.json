@@ -1,0 +1,37 @@
+{
+  "mode": "train_eval",
+  "data_path": "data/data.csv",
+  "inference_state_path": "data/inference_state.pkl",
+  "train_ratio": 0.8,
+  "n_rows": 30459,
+  "sport_metrics": {
+    "TT": {
+      "diff_mae": 5.930340893274497,
+      "total_mae": 4.021468852238413,
+      "diff_std_ratio_pred_over_actual": 0.7541884882311141,
+      "n_eval_rows": 6092
+    },
+    "BD": {
+      "diff_mae": 6.297804378890719,
+      "total_mae": 3.9692444267048366,
+      "diff_std_ratio_pred_over_actual": 0.7188072862345096,
+      "n_eval_rows": 6092
+    },
+    "SQ": {
+      "diff_mae": 6.939582885864451,
+      "total_mae": 4.322455137991394,
+      "diff_std_ratio_pred_over_actual": 0.6700025119290028,
+      "n_eval_rows": 6092
+    },
+    "TN": {
+      "diff_mae": 5.522041107265272,
+      "total_mae": 8.956271333863889,
+      "diff_std_ratio_pred_over_actual": 0.6112184335390386,
+      "n_eval_rows": 3877
+    }
+  },
+  "match_metrics": {
+    "total_diff_mae": 13.891332895600788,
+    "winner_accuracy": 0.7337491792514773
+  }
+}

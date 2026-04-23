@@ -6,8 +6,8 @@ predictor = PredictorPackage.load(
 )
 
 # player1 = "bastian böhm"
-player2 = "luke griffiths"
-# player2 = "patrick moran"
+# player2 = "luke griffiths"
+player2 = "patrick moran"
 player1 = "zain magdon-ismail"
 
 

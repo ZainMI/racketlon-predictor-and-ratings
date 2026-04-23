@@ -19,7 +19,6 @@ from models.catboost.catboost_fin import (
     PredictorPackage as CatBoostPredictorPackage,
 )
 
-
 SPORTS = ["TT", "BD", "SQ", "TN"]
 
 DATA_PATH = "data/data.csv"
@@ -390,6 +389,22 @@ def run_experiment():
 
     with open(outdir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
+
+    results_json = {
+        "abs_error": abs_err.tolist(),
+        "consistency_confidence": consistency_conf_list.tolist(),
+        "density_confidence": density_conf_list.tolist(),
+        "combined_confidence": combined_conf_list.tolist(),
+        "neighbor_target_std": target_std_list.tolist(),
+        "mean_neighbor_distance": mean_dist_list.tolist(),
+        "local_mean_target": local_mean_target_list.tolist(),
+        "y_true": y_test.tolist(),
+        "y_pred_catboost": preds.tolist(),
+        "summary": summary,
+    }
+
+    with open(outdir / "results.json", "w", encoding="utf-8") as f:
+        json.dump(results_json, f, indent=2)
 
     print(f"\nSaved results to: {outdir}")
 

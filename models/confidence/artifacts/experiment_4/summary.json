@@ -18,7 +18,7 @@
   ],
   "target_col": "y_total_diff",
   "train_ratio": 0.8,
-  "k": 5,
+  "k": 9,
   "n_rows_used": 30445,
   "train_n": 24356,
   "test_n": 6089,
@@ -27,32 +27,32 @@
     "catboost_winner_accuracy": 0.8921005091147972
   },
   "runtime_ms": {
-    "tree_build_ms": 4.979999997885898,
-    "total_query_ms": 29830.42949999799,
-    "avg_query_ms": 4.899068730497288
+    "tree_build_ms": 6.193000008352101,
+    "total_query_ms": 30095.201124961022,
+    "avg_query_ms": 4.9425523279620664
   },
   "confidence_metrics": {
     "consistency_only": {
-      "spearman_conf_vs_abs_error": 0.0017887266782029981,
-      "low_q_mae": 8.056504599211564,
-      "high_q_mae": 8.2365308804205,
-      "high_minus_low": 0.18002628120893505
+      "spearman_conf_vs_abs_error": -0.0028770930953460755,
+      "low_q_mae": 8.16819973718791,
+      "high_q_mae": 8.07161629434954,
+      "high_minus_low": -0.0965834428383694
     },
     "density_only": {
-      "spearman_conf_vs_abs_error": -0.013232852608161247,
-      "low_q_mae": 8.179369250985545,
-      "high_q_mae": 8.148488830486203,
-      "high_minus_low": -0.03088042049934181
+      "spearman_conf_vs_abs_error": -0.011872215625570741,
+      "low_q_mae": 8.174113009198424,
+      "high_q_mae": 8.04467805519054,
+      "high_minus_low": -0.12943495400788407
     },
     "combined": {
-      "spearman_conf_vs_abs_error": -0.019105621156866086,
-      "low_q_mae": 8.530880420499344,
-      "high_q_mae": 8.091984231274639,
-      "high_minus_low": -0.43889618922470497
+      "spearman_conf_vs_abs_error": -0.02418483372234205,
+      "low_q_mae": 8.486202365308804,
+      "high_q_mae": 7.917871222076215,
+      "high_minus_low": -0.568331143232589
     },
     "raw_local_signals": {
-      "spearman_neighbor_target_std_vs_abs_error": -0.001788346616263615,
-      "spearman_mean_neighbor_distance_vs_abs_error": 0.013232852608161247
+      "spearman_neighbor_target_std_vs_abs_error": 0.0028780484670401993,
+      "spearman_mean_neighbor_distance_vs_abs_error": 0.011872215625570741
     }
   }
 }
