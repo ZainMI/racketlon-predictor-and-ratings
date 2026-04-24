@@ -349,11 +349,11 @@ These metrics complement one another. MAE measures quality of margin prediction,
 
 The final boosted-tree model achieves the strongest overall match-level performance among the models considered, with mean absolute error 13.89 and winner accuracy 73.4\%. Figure~\ref{fig:scatter} shows predicted versus actual total match score difference, and Figure~\ref{fig:cm} shows the winner confusion matrix.
 
-Table~\ref{tab:results} details the evaluation metrics across all tested models.
+Table~\ref{tab:results} details the match-level evaluation metrics across all tested models, and Table~\ref{tab:sport_results} breaks down the mean absolute error for point differentials and total points by sport.
 
 \begin{table}[H]
     \centering
-    \caption{Model Performance Comparison}
+    \caption{Match-Level Performance Comparison}
     \label{tab:results}
     \begin{tabular}{lcc}
         \toprule
@@ -366,6 +366,24 @@ Table~\ref{tab:results} details the evaluation metrics across all tested models.
         \bottomrule
     \end{tabular}
 \end{table}
+
+\begin{table*}[t]
+    \centering
+    \caption{Sport-Level Mean Absolute Error (MAE) for Difference and Total Points}
+    \label{tab:sport_results}
+    \begin{tabular}{lcccccccc}
+        \toprule
+                         & \multicolumn{2}{c}{Table Tennis (TT)} & \multicolumn{2}{c}{Badminton (BD)} & \multicolumn{2}{c}{Squash (SQ)} & \multicolumn{2}{c}{Tennis (TN)}                               \\
+        \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(lr){8-9}
+        Model            & Diff                                  & Total                              & Diff                            & Total                           & Diff & Total & Diff & Total \\
+        \midrule
+        Baseline         & 6.87                                  & 8.94                               & 7.50                            & 8.68                            & 8.15 & 8.53  & 5.51 & 9.72  \\
+        Linear (Ridge)   & 6.04                                  & 4.69                               & 6.51                            & 4.64                            & 7.06 & 4.84  & 5.42 & 8.88  \\
+        Player Embedding & 5.96                                  & 4.69                               & 6.33                            & 4.75                            & 6.97 & 5.11  & 5.47 & 9.23  \\
+        Boosted Trees    & 5.93                                  & 4.02                               & 6.30                            & 3.97                            & 6.94 & 4.32  & 5.52 & 8.96  \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
 
 \begin{figure}[H]
     \centering

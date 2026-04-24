@@ -1,6 +1,6 @@
 # Fdb version 4
-["pdflatex"] 1776958916.09027 "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" "paper.pdf" "paper" 1776958916.8241 0
-  "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" 1776958915.92719 35659 d4d84c86ce4806bcbfe702479813a1bc ""
+["pdflatex"] 1776970314.4039 "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" "paper.pdf" "paper" 1776970315.10975 0
+  "/Users/zain/Documents/GitHub/racketlon-predictor-and-ratings/paper/paper.tex" 1776970313.44587 37364 ea415ad707083cb5372c9967766c2bba ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/enc/dvips/lm/lm-ec.enc" 1254269338 2375 baa924870cfb487815765f9094cf3728 ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc" 1202520719 3486 c7eadf5dcc57b3b2d11736679f6636ba ""
   "/usr/local/texlive/2025basic/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc" 1202520719 2405 5dcf2c1b967ee25cc46c58cd52244aed ""
@@ -137,9 +137,9 @@
   "figures/model_comparison_accuracy.png" 1776831949.40749 56906 b357216efd7a332e533ae9f9537b3dfd ""
   "figures/model_comparison_mae.png" 1776831949.36272 51557 2e91d0b1de8501492eba0fa4ecf73e4d ""
   "figures/winner_confusion_matrix.png" 1776832323.78947 17995 4c7504939bff856a8c9dc13bdfa4a666 ""
-  "paper.aux" 1776958916.76865 6720 0ad15479fa9f719659d50ba02d472f2e "pdflatex"
-  "paper.out" 1776958916.76926 5130 1d7930f4c2422334d1ffa001563c8a32 "pdflatex"
-  "paper.tex" 1776958915.92719 35659 d4d84c86ce4806bcbfe702479813a1bc ""
+  "paper.aux" 1776970315.05852 7029 611d1a5601b851a439e92ec1236178a2 "pdflatex"
+  "paper.out" 1776970315.05909 5130 1d7930f4c2422334d1ffa001563c8a32 "pdflatex"
+  "paper.tex" 1776970313.44587 37364 ea415ad707083cb5372c9967766c2bba ""
   (generated)
   "paper.aux"
   "paper.log"

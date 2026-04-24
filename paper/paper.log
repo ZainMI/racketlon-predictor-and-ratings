@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.27)  23 APR 2026 11:41
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2026.1.27)  23 APR 2026 14:51
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -514,23 +514,23 @@ LaTeX Font Info:    Trying to load font information for TS1+lmr on input line 28
  (/usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/ts1lmr.fd
 File: ts1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 ) [5{/usr/local/texlive/2025basic/texmf-dist/fonts/enc/dvips/lm/lm-ts1.enc}]
-<figures/match_total_diff_scatter.png, id=204, 433.62pt x 433.62pt>
+<figures/match_total_diff_scatter.png, id=205, 433.62pt x 433.62pt>
 File: figures/match_total_diff_scatter.png Graphic file (type png)
 <use figures/match_total_diff_scatter.png>
-Package pdftex.def Info: figures/match_total_diff_scatter.png  used on input line 372.
+Package pdftex.def Info: figures/match_total_diff_scatter.png  used on input line 390.
 (pdftex.def)             Requested size: 224.3979pt x 224.39859pt.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
-<figures/winner_confusion_matrix.png, id=206, 361.35pt x 289.08pt>
+<figures/winner_confusion_matrix.png, id=207, 361.35pt x 289.08pt>
 File: figures/winner_confusion_matrix.png Graphic file (type png)
 <use figures/winner_confusion_matrix.png>
-Package pdftex.def Info: figures/winner_confusion_matrix.png  used on input line 379.
+Package pdftex.def Info: figures/winner_confusion_matrix.png  used on input line 397.
 (pdftex.def)             Requested size: 200.009pt x 160.00902pt.
-<figures/model_comparison_mae.png, id=209, 650.43pt x 361.35pt>
+<figures/model_comparison_mae.png, id=210, 650.43pt x 361.35pt>
 File: figures/model_comparison_mae.png Graphic file (type png)
 <use figures/model_comparison_mae.png>
-Package pdftex.def Info: figures/model_comparison_mae.png  used on input line 390.
+Package pdftex.def Info: figures/model_comparison_mae.png  used on input line 408.
 (pdftex.def)             Requested size: 224.3979pt x 124.66588pt.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
@@ -539,64 +539,66 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 pdfTeX warning (ext4): destination with the same identifier (name{table.1}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.394 
+l.412 
       
 pdfTeX warning (ext4): destination with the same identifier (name{figure.1}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.394 
+l.412 
       
 pdfTeX warning (ext4): destination with the same identifier (name{figure.2}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.394 
+l.412 
        <./figures/match_total_diff_scatter.png> <./figures/winner_confusion_matrix.png>]
-<figures/model_comparison_accuracy.png, id=221, 650.43pt x 361.35pt>
+<figures/model_comparison_accuracy.png, id=223, 650.43pt x 361.35pt>
 File: figures/model_comparison_accuracy.png Graphic file (type png)
 <use figures/model_comparison_accuracy.png>
-Package pdftex.def Info: figures/model_comparison_accuracy.png  used on input line 397.
+Package pdftex.def Info: figures/model_comparison_accuracy.png  used on input line 415.
 (pdftex.def)             Requested size: 224.3979pt x 124.66588pt.
-<figures/feature_importance.png, id=223, 722.7pt x 505.89pt>
+<figures/feature_importance.png, id=225, 722.7pt x 505.89pt>
 File: figures/feature_importance.png Graphic file (type png)
 <use figures/feature_importance.png>
-Package pdftex.def Info: figures/feature_importance.png  used on input line 408.
+Package pdftex.def Info: figures/feature_importance.png  used on input line 426.
 (pdftex.def)             Requested size: 224.3979pt x 157.07901pt.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
  [7
+pdfTeX warning (ext4): destination with the same identifier (name{table.2}) has been already used, duplicate ignored
+<argument> ...shipout:D \box_use:N \l_shipout_box 
+                                                  \__shipout_drop_firstpage_...
+l.439 
+      
 pdfTeX warning (ext4): destination with the same identifier (name{figure.3}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.428 
+l.439 
       
 pdfTeX warning (ext4): destination with the same identifier (name{figure.4}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.428 
+l.439 
       
 pdfTeX warning (ext4): destination with the same identifier (name{figure.5}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.428 
-       <./figures/model_comparison_mae.png> <./figures/model_comparison_accuracy.png> <./figures/feature_importance.png>]
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
- [8]
-<figures/confidence_vs_error.png, id=238, 578.16pt x 361.35pt>
+l.439 
+       <./figures/model_comparison_mae.png> <./figures/model_comparison_accuracy.png> <./figures/feature_importance.png>] [8]
+<figures/confidence_vs_error.png, id=240, 578.16pt x 361.35pt>
 File: figures/confidence_vs_error.png Graphic file (type png)
 <use figures/confidence_vs_error.png>
-Package pdftex.def Info: figures/confidence_vs_error.png  used on input line 505.
+Package pdftex.def Info: figures/confidence_vs_error.png  used on input line 523.
 (pdftex.def)             Requested size: 219.51863pt x 137.19864pt.
-<figures/confidence_bins_mae.png, id=239, 505.89pt x 361.35pt>
+<figures/confidence_bins_mae.png, id=241, 505.89pt x 361.35pt>
 File: figures/confidence_bins_mae.png Graphic file (type png)
 <use figures/confidence_bins_mae.png>
-Package pdftex.def Info: figures/confidence_bins_mae.png  used on input line 511.
+Package pdftex.def Info: figures/confidence_bins_mae.png  used on input line 529.
 (pdftex.def)             Requested size: 219.51863pt x 156.80002pt.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
-LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 529.
+LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 547.
  (/usr/local/texlive/2025basic/texmf-dist/tex/latex/lm/t1lmtt.fd
 File: t1lmtt.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
@@ -605,12 +607,12 @@ Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             For optimal results, create family-specific settings.
 (microtype)             See the microtype manual for details.
 
-Underfull \hbox (badness 4328) in paragraph at lines 528--530
+Underfull \hbox (badness 4328) in paragraph at lines 546--548
 []\T1/lmr/m/n/10 (+20) For re-pro-ducibil-ity, the com-plete im-ple-men-ta-tion
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 528--530
+Underfull \hbox (badness 10000) in paragraph at lines 546--548
 \T1/lmr/m/n/10 (+20) is avail-able at: [][]$\T1/lmtt/m/n/10 https : / / github . com / ZainMI /
  []
 
@@ -620,12 +622,12 @@ Underfull \hbox (badness 10000) in paragraph at lines 528--530
 pdfTeX warning (ext4): destination with the same identifier (name{figure.6}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.531 \end{document}
+l.549 \end{document}
                     
 pdfTeX warning (ext4): destination with the same identifier (name{figure.7}) has been already used, duplicate ignored
 <argument> ...shipout:D \box_use:N \l_shipout_box 
                                                   \__shipout_drop_firstpage_...
-l.531 \end{document}
+l.549 \end{document}
                      <./figures/confidence_vs_error.png> <./figures/confidence_bins_mae.png>] (./paper.aux)
  ***********
 LaTeX2e <2025-11-01>
@@ -635,18 +637,18 @@ Package rerunfilecheck Info: File `paper.out' has not changed.
 (rerunfilecheck)             Checksum: 1D7930F4C2422334D1FFA001563C8A32;5130.
  ) 
 Here is how much of TeX's memory you used:
- 14139 strings out of 469005
- 220615 string characters out of 5454798
- 679013 words of memory out of 5000000
- 42396 multiletter control sequences out of 15000+600000
+ 14143 strings out of 469005
+ 220697 string characters out of 5454798
+ 679109 words of memory out of 5000000
+ 42399 multiletter control sequences out of 15000+600000
  694775 words of font info for 166 fonts, out of 8000000 for 9000
  319 hyphenation exceptions out of 8191
  75i,10n,79p,1642b,464s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmbx10.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmbx12.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmex10.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmmi10.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmmi5.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmmi7.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmr10.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmr12.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmr7.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmri10.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmsy10.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmsy7.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/lm/lmtt10.pfb></usr/local/texlive/2025basic/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb>
-Output written on paper.pdf (9 pages, 873104 bytes).
+Output written on paper.pdf (9 pages, 873794 bytes).
 PDF statistics:
- 346 PDF objects out of 1000 (max. 8388607)
- 287 compressed objects within 3 object streams
- 78 named destinations out of 1000 (max. 500000)
+ 349 PDF objects out of 1000 (max. 8388607)
+ 290 compressed objects within 3 object streams
+ 79 named destinations out of 1000 (max. 500000)
  37668 words of extra memory for PDF output out of 42996 (max. 10000000)
 
