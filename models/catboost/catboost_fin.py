@@ -74,6 +74,70 @@ def ensure_dir(path):
     return p
 
 
+def augment_with_mirrored_rows(df: pd.DataFrame) -> pd.DataFrame:
+    mirrored = df.copy()
+
+    for a, b in [("p1_name", "p2_name"), ("p1_key", "p2_key")]:
+        if a in mirrored.columns and b in mirrored.columns:
+            mirrored[a], mirrored[b] = mirrored[b].copy(), mirrored[a].copy()
+
+    cols = list(mirrored.columns)
+
+    for col in cols:
+        if "_p1" in col:
+            other = col.replace("_p1", "_p2")
+            if other in mirrored.columns:
+                mirrored[col], mirrored[other] = (
+                    mirrored[other].copy(),
+                    mirrored[col].copy(),
+                )
+
+    target_diff_cols = {f"{sport}_y_diff" for sport in SPORTS}
+    target_diff_cols.add("y_total_diff")
+
+    for col in target_diff_cols:
+        if col in mirrored.columns:
+            mirrored[col] = -mirrored[col]
+
+    if "y_winner_p1" in mirrored.columns:
+        mirrored["y_winner_p1"] = 1 - mirrored["y_winner_p1"]
+
+    if "rating_winner_p1" in mirrored.columns:
+        mirrored["rating_winner_p1"] = 1 - mirrored["rating_winner_p1"]
+
+    for col in mirrored.columns:
+        if col in target_diff_cols:
+            continue
+
+        should_negate = (
+            col.endswith("_diff")
+            or col.endswith("_diff_p1_p2")
+            or col.endswith("_avg_diff_p1")
+        )
+
+        if should_negate and pd.api.types.is_numeric_dtype(mirrored[col]):
+            mirrored[col] = -mirrored[col]
+
+    for col in mirrored.columns:
+        if col.endswith("_winrate_p1") and pd.api.types.is_numeric_dtype(
+            mirrored[col]
+        ):
+            mirrored[col] = 1.0 - mirrored[col]
+
+    df = df.copy()
+    df["is_mirrored_row"] = 0
+    mirrored["is_mirrored_row"] = 1
+
+    out = pd.concat([df, mirrored], ignore_index=True)
+
+    if "datetime" in out.columns:
+        out = out.sort_values(["datetime", "is_mirrored_row"]).reset_index(
+            drop=True
+        )
+
+    return out
+
+
 def read_data(path):
     df = pd.read_csv(path, low_memory=False)
     if "datetime" in df.columns:
@@ -82,6 +146,7 @@ def read_data(path):
     for col in ["p1_name", "p2_name", "p1_key", "p2_key"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.lower()
+    df = augment_with_mirrored_rows(df)
     return df
 
 
@@ -300,6 +365,7 @@ def get_feature_columns(df):
         "y_total_diff",
         "y_winner_p1",
         "rating_winner_p1",
+        "is_mirrored_row",
     }
 
     feature_cols = []
@@ -369,20 +435,20 @@ def get_total_feature_cols(df, sport):
 # -------------------------------------------------
 # Synthetic inference row
 # -------------------------------------------------
-def build_synthetic_match_row(inference_state, player1, player2, feature_cols):
-    p1 = player1.strip().lower()
-    p2 = player2.strip().lower()
-    if p1 == p2:
+def build_synthetic_match_row(
+    inference_state, player1_key, player2_key, feature_cols
+):
+    if player1_key == player2_key:
         raise ValueError("PLAYER1 and PLAYER2 must be different.")
 
-    player_states = inference_state["player_states_by_name"]
-    if p1 not in player_states:
-        raise ValueError(f"No history found for player '{player1}'")
-    if p2 not in player_states:
-        raise ValueError(f"No history found for player '{player2}'")
+    player_states = inference_state["player_states_by_key"]
+    if player1_key not in player_states:
+        raise ValueError(f"No history found for player '{player1_key}'")
+    if player2_key not in player_states:
+        raise ValueError(f"No history found for player '{player2_key}'")
 
-    s1 = player_states[p1]
-    s2 = player_states[p2]
+    s1 = player_states[player1_key]
+    s2 = player_states[player2_key]
 
     row = {}
 
@@ -391,20 +457,24 @@ def build_synthetic_match_row(inference_state, player1, player2, feature_cols):
     row["h2h_winrate_p1"] = 0.5
     row["h2h_days_since_last"] = 9999.0
 
-    pk = (p1, p2) if p1 <= p2 else (p2, p1)
+    pk = (
+        (player1_key, player2_key)
+        if player1_key <= player2_key
+        else (player2_key, player1_key)
+    )
     pair_h2h = inference_state["pair_h2h"].get(pk)
 
     if pair_h2h is not None:
         overall = pair_h2h["overall"]
-        a_name = pair_h2h["a_name"]
-        b_name = pair_h2h["b_name"]
+        a_key = pair_h2h["a_name"]
+        b_key = pair_h2h["b_name"]
 
         row["h2h_games"] = overall["h2h_games"]
         row["h2h_days_since_last"] = float(
             overall.get("h2h_days_since_last", 9999.0)
         )
 
-        if p1 == a_name and p2 == b_name:
+        if player1_key == a_key and player2_key == b_key:
             row["h2h_avg_diff_p1"] = overall["h2h_avg_diff_p1"]
             row["h2h_winrate_p1"] = overall["h2h_winrate_p1"]
         else:
@@ -450,15 +520,15 @@ def build_synthetic_match_row(inference_state, player1, player2, feature_cols):
 
         if pair_h2h is not None:
             sport_h = pair_h2h["sports"][sport]
-            a_name = pair_h2h["a_name"]
-            b_name = pair_h2h["b_name"]
+            a_key = pair_h2h["a_name"]
+            b_key = pair_h2h["b_name"]
 
             row[f"{sport}_h2h_games"] = sport_h[f"{sport}_h2h_games"]
             row[f"{sport}_h2h_days_since_last"] = float(
                 sport_h.get(f"{sport}_h2h_days_since_last", 9999.0)
             )
 
-            if p1 == a_name and p2 == b_name:
+            if player1_key == a_key and player2_key == b_key:
                 row[f"{sport}_h2h_avg_diff_p1"] = sport_h[
                     f"{sport}_h2h_avg_diff_p1"
                 ]
@@ -536,15 +606,25 @@ class PredictorPackage:
             metadata=metadata,
         )
 
-    def predict_pair(self, player1, player2):
+    def predict_pair(self, player1_key, player2_key):
         total_p1 = 0
         total_p2 = 0
         sports_out = {}
 
+        p1_state = self.get_player_state(player1_key)
+        p2_state = self.get_player_state(player2_key)
+
+        p1_name = p1_state.get("player_name", player1_key)
+        p2_name = p2_state.get("player_name", player2_key)
+
         for sport in SPORTS:
             pack = self.models[sport]
+
             row = build_synthetic_match_row(
-                self.inference_state, player1, player2, pack["all_feat_cols"]
+                self.inference_state,
+                player1_key,
+                player2_key,
+                pack["all_feat_cols"],
             )
 
             X_base = pd.DataFrame(
@@ -562,13 +642,16 @@ class PredictorPackage:
             X_resid = X_resid.copy()
             X_resid["base_pred_diff"] = base_pred
             X_resid["abs_base_pred_diff"] = abs(base_pred)
+
             resid_pred = float(pack["model_diff_resid"].predict(X_resid)[0])
 
             pred_diff_raw = base_pred + RESIDUAL_SCALE * resid_pred
+
             pred_diff = float(
                 np.clip(
                     apply_linear_calibrator(
-                        np.array([pred_diff_raw]), pack["diff_calibrator"]
+                        np.array([pred_diff_raw]),
+                        pack["diff_calibrator"],
                     )[0],
                     -21,
                     21,
@@ -586,41 +669,53 @@ class PredictorPackage:
                     s1, s2 = decode_full_game_score(pred_diff, pred_total)
                 else:
                     s1, s2 = decode_tennis_score(
-                        pred_diff, pred_total, total_p1 - total_p2
+                        pred_diff,
+                        pred_total,
+                        total_p1 - total_p2,
                     )
+
+            s1 = int(s1)
+            s2 = int(s2)
 
             total_p1 += s1
             total_p2 += s2
 
             sports_out[sport] = {
-                "score_p1": int(s1),
-                "score_p2": int(s2),
+                "score_p1": s1,
+                "score_p2": s2,
                 "base_pred_diff": float(base_pred),
                 "resid_pred_diff": float(resid_pred),
                 "pred_diff": float(pred_diff),
                 "pred_total": float(pred_total),
             }
 
-        total_diff = total_p1 - total_p2
+        total_p1 = int(total_p1)
+        total_p2 = int(total_p2)
+        total_diff = int(total_p1 - total_p2)
+
         winner = (
-            player1 if total_diff > 0 else player2 if total_diff < 0 else "Draw"
+            p1_name if total_diff > 0 else p2_name if total_diff < 0 else "Draw"
         )
 
         return {
-            "player1": player1,
-            "player2": player2,
+            "player1": player1_key,
+            "player2": player2_key,
+            "player1_key": player1_key,
+            "player2_key": player2_key,
+            "player1_name": p1_name,
+            "player2_name": p2_name,
             "sports": sports_out,
-            "total_p1": int(total_p1),
-            "total_p2": int(total_p2),
-            "total_diff": int(total_diff),
+            # official displayed prediction totals
+            "total_p1": total_p1,
+            "total_p2": total_p2,
+            "total_diff": total_diff,
             "winner": winner,
         }
 
-    def get_player_state(self, player):
-        p = player.strip().lower()
-        state = self.inference_state["player_states_by_name"].get(p)
+    def get_player_state(self, player_key):
+        state = self.inference_state["player_states_by_key"].get(player_key)
         if state is None:
-            raise ValueError(f"No history found for player '{player}'")
+            raise ValueError(f"No history found for player '{player_key}'")
         return state
 
 
@@ -633,18 +728,23 @@ def load_predictor(directory: str = OUTPUT_DIR) -> PredictorPackage:
 
 def predict_match(
     predictor: PredictorPackage,
-    player1: str,
-    player2: str,
+    player1_key: str,
+    player2_key: str,
 ) -> dict:
-    return predictor.predict_pair(player1, player2)
+    return predictor.predict_pair(player1_key, player2_key)
 
 
 def get_player_ratings(
     predictor: PredictorPackage,
-    player: str,
+    player_key: str,
 ) -> dict:
-    state = predictor.get_player_state(player)
-    out = {"player": player, "sports": {}}
+    state = predictor.get_player_state(player_key)
+    out = {
+        "player_key": player_key,
+        "player_name": state.get("player_name", player_key),
+        "country": state.get("player_country", ""),
+        "sports": {},
+    }
 
     for sport in SPORTS:
         out["sports"][sport] = {

@@ -28,7 +28,7 @@ SPORTS = ["TT", "BD", "SQ", "TN"]
 # =================================================
 # Identity config
 # =================================================
-USE_IDS = False
+USE_IDS = True
 
 # =================================================
 # One-rating-per-sport config
@@ -106,11 +106,21 @@ def normalize_player_name(x) -> str:
 
 
 def player_key(row: pd.Series, side: int) -> str:
-    if USE_IDS:
-        col = f"team{side}_player_ids"
-        if col in row and not pd.isna(row[col]):
-            return str(row[col]).strip()
-    return normalize_player_name(row.get(f"team{side}_players", ""))
+    """
+    Generates a unique key using:
+    name + country
+
+    Format:
+    name__country
+    """
+    name = normalize_player_name(row.get(f"team{side}_players", "unknown"))
+    country = str(row.get(f"team{side}_nationalities", "")).strip().lower()
+
+    # Fallback if country missing
+    if not country or country == "nan":
+        return f"name::{name}"
+
+    return f"{name}__{country}"
 
 
 def player_name(row: pd.Series, side: int) -> str:

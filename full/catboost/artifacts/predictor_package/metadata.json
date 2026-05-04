@@ -3,35 +3,35 @@
   "data_path": "data/data.csv",
   "inference_state_path": "data/inference_state.pkl",
   "train_ratio": 0.8,
-  "n_rows": 30459,
+  "n_rows": 60918,
   "sport_metrics": {
     "TT": {
-      "diff_mae": 5.930340893274497,
-      "total_mae": 4.021468852238413,
-      "diff_std_ratio_pred_over_actual": 0.7541884882311141,
-      "n_eval_rows": 6092
+      "diff_mae": 5.923904010399658,
+      "total_mae": 4.0008960511124165,
+      "diff_std_ratio_pred_over_actual": 0.7424963760453143,
+      "n_eval_rows": 12184
     },
     "BD": {
-      "diff_mae": 6.297804378890719,
-      "total_mae": 3.9692444267048366,
-      "diff_std_ratio_pred_over_actual": 0.7188072862345096,
-      "n_eval_rows": 6092
+      "diff_mae": 6.330459150088766,
+      "total_mae": 3.966442078148723,
+      "diff_std_ratio_pred_over_actual": 0.7079179908468326,
+      "n_eval_rows": 12184
     },
     "SQ": {
-      "diff_mae": 6.939582885864451,
-      "total_mae": 4.322455137991394,
-      "diff_std_ratio_pred_over_actual": 0.6700025119290028,
-      "n_eval_rows": 6092
+      "diff_mae": 6.960418390886937,
+      "total_mae": 4.316801923172077,
+      "diff_std_ratio_pred_over_actual": 0.6557981111829659,
+      "n_eval_rows": 12184
     },
     "TN": {
-      "diff_mae": 5.522041107265272,
-      "total_mae": 8.956271333863889,
-      "diff_std_ratio_pred_over_actual": 0.6112184335390386,
-      "n_eval_rows": 3877
+      "diff_mae": 5.5238706083681866,
+      "total_mae": 8.90008075320058,
+      "diff_std_ratio_pred_over_actual": 0.5884265796650776,
+      "n_eval_rows": 7754
     }
   },
   "match_metrics": {
-    "total_diff_mae": 13.891332895600788,
-    "winner_accuracy": 0.7337491792514773
+    "total_diff_mae": 13.82903808273145,
+    "winner_accuracy": 0.7355548260013132
   }
 }
